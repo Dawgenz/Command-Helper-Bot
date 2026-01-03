@@ -7,16 +7,35 @@ const port = 3000;
 app.get('/', (req, res) => {
     const pendingCount = db.prepare('SELECT COUNT(*) as count FROM pending_locks').get().count;
     res.send(`
-        <html>
-            <body style="font-family: sans-serif; background: #2c2f33; color: white; text-align: center; padding-top: 50px;">
-                <h1>🤖 Bot Status: ONLINE</h1>
-                <p>Connected as: <strong>${client.user.tag}</strong></p>
-                <div style="background: #23272a; display: inline-block; padding: 20px; border-radius: 10px;">
-                    <h2>Pending Thread Locks: ${pendingCount}</h2>
-                </div>
-                <p style="margin-top: 20px; color: #7289da;">Running on Raspberry Pi 4B</p>
-            </body>
-        </html>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Bot Command Dashboard</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .card { background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 25px rgba(0,0,0,0.5); text-align: center; border: 1px solid #334155; width: 90%; max-width: 400px; }
+            h1 { color: #38bdf8; margin-bottom: 0.5rem; }
+            .status { display: inline-block; padding: 0.25rem 0.75rem; background: #10b981; border-radius: 1rem; font-size: 0.8rem; font-weight: bold; margin-bottom: 1.5rem; }
+            .stat-box { background: #0f172a; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #38bdf8; }
+            .stat-number { font-size: 2.5rem; font-weight: 800; display: block; }
+            .stat-label { color: #94a3b8; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05rem; }
+            footer { margin-top: 2rem; font-size: 0.8rem; color: #64748b; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <span class="status">● BOT ONLINE</span>
+            <h1>Dashboard</h1>
+            <p style="color: #94a3b8">Bedrock Command Helper</p>
+            <div class="stat-box">
+                <span class="stat-number">${pendingCount}</span>
+                <span class="stat-label">Pending Thread Locks</span>
+            </div>
+            <footer>Running on <strong>Raspberry Pi 4B</strong></footer>
+        </div>
+    </body>
+    </html>
     `);
 });
 
