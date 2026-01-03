@@ -145,7 +145,7 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'resolved') {
-        const lockTime = Date.now() + (30 * 60 * 1000);
+        const lockTime = Date.now() + (5000); //30 * 60 * 1000
         db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, lock_at) VALUES (?, ?)').run(interaction.channelId, lockTime);
         await interaction.reply("**Thread marked as Resolved.** Locking in 30 minutes.");
     }
