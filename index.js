@@ -1,5 +1,29 @@
 // index.js
 
+const express = require('express');
+const app = express();
+const port = 3000;
+
+app.get('/', (req, res) => {
+    const pendingCount = db.prepare('SELECT COUNT(*) as count FROM pending_locks').get().count;
+    res.send(`
+        <html>
+            <body style="font-family: sans-serif; background: #2c2f33; color: white; text-align: center; padding-top: 50px;">
+                <h1>🤖 Bot Status: ONLINE</h1>
+                <p>Connected as: <strong>${client.user.tag}</strong></p>
+                <div style="background: #23272a; display: inline-block; padding: 20px; border-radius: 10px;">
+                    <h2>Pending Thread Locks: ${pendingCount}</h2>
+                </div>
+                <p style="margin-top: 20px; color: #7289da;">Running on Raspberry Pi 4B</p>
+            </body>
+        </html>
+    `);
+});
+
+app.listen(port, () => {
+    console.log(`🌐 Dashboard live at http://localhost:${port}`);
+});
+
 require('dotenv').config();
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const Database = require('better-sqlite3');
