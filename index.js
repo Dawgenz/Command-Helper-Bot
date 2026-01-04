@@ -68,14 +68,34 @@ app.get('/logout', (req, res) => {
     req.logout(() => res.redirect('/'));
 });
 
+// HELPER: Shared Header/Favicon HTML
+const getHead = (title) => `
+    <head>
+        <title>${title}</title>
+        <link rel="icon" type="image/png" href="${client.user.displayAvatarURL()}">
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=JetBrains+Mono&display=swap');
+            body { font-family: 'Space Grotesk', sans-serif; }
+            .mono { font-family: 'JetBrains Mono', monospace; }
+            .glow-amber { box-shadow: 0 0 20px rgba(255, 170, 0, 0.15); }
+            .border-amber { border-color: rgba(255, 170, 0, 0.3); }
+            ::-webkit-scrollbar { width: 8px; }
+            ::-webkit-scrollbar-track { background: #0b0f1a; }
+            ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+            ::-webkit-scrollbar-thumb:hover { background: #FFAA00; }
+        </style>
+    </head>
+`;
+
 // MAIN DASHBOARD
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
-        // ... (Login page stays mostly the same, just update the sky-400 to [#FFAA00])
-        return res.send(`<html><script src="https://cdn.tailwindcss.com"></script><body class="bg-slate-950 text-white flex items-center justify-center h-screen"><div class="text-center p-10 bg-slate-900 rounded-2xl shadow-2xl border border-[#FFAA00]/20"><h1 class="text-4xl font-bold mb-6 text-[#FFAA00]">Impulse Bot Dashboard</h1><a href="/auth/discord" class="bg-[#FFAA00] hover:bg-[#cc8800] text-black transition px-8 py-3 rounded-lg font-bold text-lg inline-block">Login with Discord</a></div></body></html>`);
+        return res.send(`<html>${getHead('Impulse | Login')}<body class="bg-[#0b0f1a] text-white flex items-center justify-center h-screen"><div class="text-center p-10 bg-slate-900 rounded-2xl border border-amber glow-amber"><h1 class="text-4xl font-bold mb-6 text-[#FFAA00]">Impulse Bot</h1><a href="/auth/discord" class="bg-[#FFAA00] hover:scale-105 transition-transform text-black px-8 py-3 rounded-lg font-bold text-lg inline-block">Login with Discord</a></div></body></html>`);
     }
 
     const botAvatar = client.user.displayAvatarURL();
+    const userAvatar = `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`;
     const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
     const authorizedGuilds = [];
 
@@ -85,86 +105,165 @@ app.get('/', async (req, res) => {
         try {
             const member = await guild.members.fetch(req.user.id);
             if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
-                // Fetch the actual timers for this guild
                 const timers = db.prepare('SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?').all(settings.guild_id);
                 authorizedGuilds.push({ ...settings, timers });
             }
         } catch (e) {}
     }
 
-    const logs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 8`).all();
+    const logs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 10`).all();
 
     res.send(`
     <html>
-    <head>
-        <title>Impulse Bot | Dashboard</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>
-            .glow { box-shadow: 0 0 15px rgba(255, 170, 0, 0.1); }
-            .border-amber { border-color: rgba(255, 170, 0, 0.3); }
-        </style>
-    </head>
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-8">
+    ${getHead('Impulse | Mission Control')}
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-4 md:p-8">
         <div class="max-w-6xl mx-auto">
-            <header class="flex justify-between items-center mb-10">
+            <header class="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
                 <div class="flex items-center gap-4">
-                    <img src="${botAvatar}" class="w-12 h-12 rounded-full border-2 border-[#FFAA00] shadow-[0_0_10px_#FFAA00]">
-                    <h1 class="text-3xl font-extrabold text-white tracking-tighter">IMPULSE <span class="text-[#FFAA00] text-xl font-mono ml-2">v2.0</span></h1>
+                    <img src="${botAvatar}" class="w-14 h-14 rounded-full border-2 border-[#FFAA00] shadow-[0_0_15px_rgba(255,170,0,0.4)]">
+                    <div>
+                        <h1 class="text-3xl font-extrabold text-white tracking-tighter leading-none">IMPULSE</h1>
+                        <span class="text-[#FFAA00] text-xs font-mono tracking-[0.3em] uppercase">Mission Control</span>
+                    </div>
                 </div>
-                <div class="flex items-center gap-4 text-sm font-medium">
-                    <span class="bg-slate-800 px-3 py-1 rounded-full border border-slate-700">Logged as ${req.user.username}</span>
-                    <a href="/logout" class="text-rose-500 hover:text-rose-400 transition">Logout</a>
+                <div class="flex items-center gap-4 bg-slate-900/80 p-2 pr-5 rounded-full border border-slate-800">
+                    <img src="${userAvatar}" class="w-10 h-10 rounded-full border border-[#FFAA00]/50">
+                    <div class="flex flex-col">
+                        <span class="text-sm font-bold text-white leading-none">${req.user.username}</span>
+                        <a href="/logout" class="text-[10px] text-rose-500 hover:underline uppercase font-bold tracking-widest mt-1">Disconnect</a>
+                    </div>
                 </div>
             </header>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
                 ${authorizedGuilds.map(s => `
-                    <div class="bg-slate-900/50 p-6 rounded-xl border border-amber glow">
-                        <h3 class="text-[#FFAA00] uppercase text-xs font-bold mb-4 tracking-widest">${s.guild_name}</h3>
-                        <div class="space-y-3">
+                    <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-amber glow-amber">
+                        <h3 class="text-[#FFAA00] uppercase text-[10px] font-black mb-4 tracking-widest opacity-80">${s.guild_name}</h3>
+                        <div class="space-y-2">
                             ${s.timers.length > 0 ? s.timers.map(t => `
-                                <div class="flex justify-between items-center bg-black/30 p-2 rounded border border-slate-800">
-                                    <span class="text-xs font-mono text-slate-400">#${t.thread_id.slice(-4)}</span>
-                                    <span class="text-xs font-bold text-emerald-400" data-expire="${t.lock_at}">Calculating...</span>
+                                <div class="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-slate-800/50">
+                                    <span class="text-xs mono text-slate-500">ID:${t.thread_id.slice(-5)}</span>
+                                    <span class="text-xs font-bold text-emerald-400 mono" data-expire="${t.lock_at}">--:--</span>
                                 </div>
-                            `).join('') : '<div class="text-slate-600 text-xs italic">No active timers</div>'}
+                            `).join('') : '<div class="text-slate-600 text-xs py-2 italic text-center">No active lockdown timers</div>'}
                         </div>
                     </div>`).join('')}
             </div>
 
-            <div class="bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden shadow-2xl">
-                <div class="p-6 border-b border-slate-800 flex justify-between items-center">
-                    <h2 class="text-xl font-bold text-white">Audit Log Feed</h2>
-                    <a href="/logs" class="bg-[#FFAA00]/10 text-[#FFAA00] px-4 py-1 rounded hover:bg-[#FFAA00]/20 transition text-xs font-bold">VIEW ALL</a>
+            <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
+                <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/20">
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                        Recent Activity
+                    </h2>
+                    <a href="/logs" class="text-[#FFAA00] text-[10px] font-black tracking-widest hover:bg-[#FFAA00] hover:text-black transition px-4 py-2 rounded-lg border border-[#FFAA00]/20">FULL AUDIT</a>
                 </div>
-                <div class="divide-y divide-slate-800/50 font-mono">
-                    ${logs.map(l => `<div class="p-4 hover:bg-[#FFAA00]/5 transition text-sm flex gap-4">
-                        <span class="text-[#FFAA00] opacity-50 text-xs">[${new Date(l.timestamp).toLocaleTimeString()}]</span>
-                        <span class="text-[#FFAA00] font-bold underline decoration-dotted">${l.action}</span>
-                        <span class="text-slate-400">${l.details}</span>
-                    </div>`).join('')}
+                <div class="divide-y divide-slate-800/40">
+                    ${logs.map(l => `
+                        <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
+                            <div class="text-[10px] mono text-slate-600 w-20 text-right">${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                            <div class="px-2 py-0.5 rounded text-[9px] font-black mono bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20">${l.action}</div>
+                            <div class="text-sm text-slate-400 truncate">${l.details}</div>
+                        </div>
+                    `).join('')}
                 </div>
             </div>
         </div>
-
         <script>
             function updateTimers() {
                 document.querySelectorAll('[data-expire]').forEach(el => {
-                    const expire = parseInt(el.getAttribute('data-expire'));
-                    const now = Date.now();
-                    const diff = expire - now;
+                    const diff = parseInt(el.getAttribute('data-expire')) - Date.now();
                     if (diff <= 0) {
-                        el.innerText = "LOCKING...";
-                        el.classList.replace('text-emerald-400', 'text-rose-500');
+                        el.innerText = "LOCKED";
+                        el.className = "text-xs font-bold text-rose-500 mono";
                     } else {
-                        const mins = Math.floor(diff / 60000);
-                        const secs = Math.floor((diff % 60000) / 1000);
-                        el.innerText = mins + "m " + secs + "s";
+                        const m = Math.floor(diff / 60000);
+                        const s = Math.floor((diff % 60000) / 1000);
+                        el.innerText = m + "m " + s + "s";
                     }
                 });
             }
-            setInterval(updateTimers, 1000);
-            updateTimers();
+            setInterval(updateTimers, 1000); updateTimers();
+        </script>
+    </body></html>`);
+});
+
+// FULL LOGS PAGE WITH SEARCH & FILTER
+app.get('/logs', async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    const allLogs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 100`).all();
+    
+    res.send(`
+    <html>
+    ${getHead('Impulse | Audit Logs')}
+    <body class="bg-[#0b0f1a] text-slate-200 p-4 md:p-8">
+        <div class="max-w-5xl mx-auto">
+            <div class="flex justify-between items-end mb-8">
+                <div>
+                    <a href="/" class="text-[#FFAA00] text-[10px] font-black tracking-[0.2em] hover:underline">← BACK TO TERMINAL</a>
+                    <h1 class="text-4xl font-black text-white mt-2">Audit Logs</h1>
+                </div>
+                <div class="flex gap-2 mb-1">
+                    <input type="text" id="logSearch" placeholder="Search logs..." class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition">
+                </div>
+            </div>
+
+            <div class="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
+                <button onclick="filterLogs('ALL')" class="filter-btn active bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-xs font-bold">ALL</button>
+                <button onclick="filterLogs('SETUP')" class="filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition">SETUP</button>
+                <button onclick="filterLogs('LOCK')" class="filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition">LOCK</button>
+                <button onclick="filterLogs('GREET')" class="filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition">GREET</button>
+            </div>
+
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-black/40 text-[10px] uppercase font-black tracking-widest text-slate-500">
+                        <tr>
+                            <th class="p-4 border-b border-slate-800">Server</th>
+                            <th class="p-4 border-b border-slate-800">Action</th>
+                            <th class="p-4 border-b border-slate-800">Details</th>
+                            <th class="p-4 border-b border-slate-800">Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-xs">
+                        ${allLogs.map(l => `
+                            <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}">
+                                <td class="p-4 text-slate-300 font-sans font-bold">${l.guild_name || 'N/A'}</td>
+                                <td class="p-4"><span class="bg-[#FFAA00]/10 text-[#FFAA00] px-2 py-0.5 rounded border border-[#FFAA00]/20 font-black">${l.action}</span></td>
+                                <td class="p-4 text-slate-400">${l.details}</td>
+                                <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleString()}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <script>
+            const search = document.getElementById('logSearch');
+            const rows = document.querySelectorAll('.log-row');
+
+            search.addEventListener('keyup', () => {
+                const term = search.value.toLowerCase();
+                rows.forEach(row => {
+                    const text = row.innerText.toLowerCase();
+                    row.style.display = text.includes(term) ? '' : 'none';
+                });
+            });
+
+            function filterLogs(action) {
+                document.querySelectorAll('.filter-btn').forEach(btn => {
+                    btn.classList = "filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition";
+                });
+                event.target.classList = "filter-btn bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-xs font-bold";
+                
+                rows.forEach(row => {
+                    if(action === 'ALL' || row.getAttribute('data-action') === action) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+            }
         </script>
     </body></html>`);
 });
