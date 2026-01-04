@@ -71,7 +71,8 @@ app.get('/logout', (req, res) => {
 // HELPER: Shared Header/Favicon HTML
 const getHead = (title) => `
     <head>
-        <title>${title}</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>${title}</title>
         <link rel="icon" type="image/png" href="${client.user.displayAvatarURL()}">
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
@@ -84,6 +85,7 @@ const getHead = (title) => `
             ::-webkit-scrollbar-track { background: #0b0f1a; }
             ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
             ::-webkit-scrollbar-thumb:hover { background: #FFAA00; }
+            .no-scrollbar::-webkit-scrollbar { display: none; }
         </style>
     </head>
 `;
@@ -94,35 +96,35 @@ app.get('/', async (req, res) => {
         return res.send(`
         <html>
         ${getHead('Impulse | Terminal Access')}
-        <body class="bg-[#0b0f1a] text-white flex items-center justify-center h-screen p-6">
+        <body class="bg-[#0b0f1a] text-white flex items-center justify-center min-h-screen p-6">
             <div class="max-w-md w-full">
                 <div class="text-center mb-8">
                     <div class="inline-block p-4 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_20px_rgba(255,170,0,0.3)] mb-4 animate-pulse">
                         <img src="${client.user.displayAvatarURL()}" class="w-16 h-16 rounded-full">
                     </div>
-                    <h1 class="text-4xl font-black tracking-tighter text-white">IMPULSE <span class="text-[#FFAA00]">OS</span></h1>
-                    <p class="text-slate-500 text-xs mt-2 uppercase tracking-[0.2em]">Automated Thread Management System</p>
+                    <h1 class="text-4xl font-black tracking-tighter text-white uppercase italic">Impulse <span class="text-[#FFAA00]">OS</span></h1>
+                    <p class="text-slate-500 text-[10px] mt-2 uppercase tracking-[0.2em]">Automated Thread Management System</p>
                 </div>
                 
-                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative overflow-hidden">
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl backdrop-blur-md relative overflow-hidden">
                     <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#FFAA00] to-transparent opacity-20"></div>
                     
                     <div class="space-y-4 mb-8">
                         <div class="flex items-start gap-3">
-                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00]"></div>
+                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00] shrink-0"></div>
                             <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">STATUS:</span> System online. Monitoring 24/7 forum threads and community health.</p>
                         </div>
                         <div class="flex items-start gap-3">
-                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00]"></div>
-                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Dashboard requires Discord Administrator or Command Helper authentication.</p>
+                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00] shrink-0"></div>
+                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Mission Control requires Admin or Helper clearance.</p>
                         </div>
                     </div>
 
-                    <a href="/auth/discord" class="w-full text-center bg-[#FFAA00] hover:bg-[#ffbb33] text-black py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)] block">
+                    <a href="/auth/discord" class="w-full text-center bg-[#FFAA00] hover:bg-[#ffbb33] text-black py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)] block">
                         Establish Connection
                     </a>
                     
-                    <p class="text-[10px] text-center text-slate-600 mt-6 uppercase tracking-widest italic">Authorized access only</p>
+                    <p class="text-[9px] text-center text-slate-600 mt-6 uppercase tracking-widest italic font-bold">Authorized personnel only</p>
                 </div>
             </div>
         </body></html>`);
@@ -154,29 +156,29 @@ app.get('/', async (req, res) => {
         <div class="max-w-6xl mx-auto">
             <header class="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
                 <div class="flex items-center gap-4">
-                    <img src="${botAvatar}" class="w-14 h-14 rounded-full border-2 border-[#FFAA00] shadow-[0_0_15px_rgba(255,170,0,0.4)]">
+                    <img src="${botAvatar}" class="w-12 h-12 md:w-14 md:h-14 rounded-full border-2 border-[#FFAA00] shadow-[0_0_15px_rgba(255,170,0,0.4)]">
                     <div>
-                        <h1 class="text-3xl font-extrabold text-white tracking-tighter leading-none">IMPULSE</h1>
-                        <span class="text-[#FFAA00] text-xs font-mono tracking-[0.3em] uppercase">Mission Control</span>
+                        <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tighter leading-none">IMPULSE</h1>
+                        <span class="text-[#FFAA00] text-[10px] md:text-xs font-mono tracking-[0.3em] uppercase">Mission Control</span>
                     </div>
                 </div>
-                <div class="flex items-center gap-4 bg-slate-900/80 p-2 pr-5 rounded-full border border-slate-800">
-                    <img src="${userAvatar}" class="w-10 h-10 rounded-full border border-[#FFAA00]/50">
+                <div class="flex items-center gap-3 bg-slate-900/80 p-2 pr-5 rounded-full border border-slate-800">
+                    <img src="${userAvatar}" class="w-8 h-8 md:w-10 md:h-10 rounded-full border border-[#FFAA00]/50">
                     <div class="flex flex-col">
-                        <span class="text-sm font-bold text-white leading-none">${req.user.username}</span>
-                        <a href="/logout" class="text-[10px] text-rose-500 hover:underline uppercase font-bold tracking-widest mt-1">Disconnect</a>
+                        <span class="text-xs md:text-sm font-bold text-white leading-none">${req.user.username}</span>
+                        <a href="/logout" class="text-[9px] text-rose-500 hover:underline uppercase font-bold tracking-widest mt-1">Disconnect</a>
                     </div>
                 </div>
             </header>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                 ${authorizedGuilds.map(s => `
                     <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-amber glow-amber">
-                        <h3 class="text-[#FFAA00] uppercase text-[10px] font-black mb-4 tracking-widest opacity-80">${s.guild_name}</h3>
+                        <h3 class="text-[#FFAA00] uppercase text-[10px] font-black mb-4 tracking-widest opacity-80 truncate">${s.guild_name}</h3>
                         <div class="space-y-2">
                             ${s.timers.length > 0 ? s.timers.map(t => `
                                 <div class="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-slate-800/50">
-                                    <span class="text-xs mono text-slate-500">ID:${t.thread_id.slice(-5)}</span>
+                                    <span class="text-[10px] mono text-slate-500">ID:${t.thread_id.slice(-5)}</span>
                                     <span class="text-xs font-bold text-emerald-400 mono" data-expire="${t.lock_at}">--:--</span>
                                 </div>
                             `).join('') : '<div class="text-slate-600 text-xs py-2 italic text-center">No active lockdown timers</div>'}
@@ -186,18 +188,18 @@ app.get('/', async (req, res) => {
 
             <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
                 <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/20">
-                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                    <h2 class="text-md md:text-lg font-bold text-white flex items-center gap-2 uppercase tracking-tight">
                         <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                        Recent Activity
+                        Live Feed
                     </h2>
-                    <a href="/logs" class="text-[#FFAA00] text-[10px] font-black tracking-widest hover:bg-[#FFAA00] hover:text-black transition px-4 py-2 rounded-lg border border-[#FFAA00]/20">FULL AUDIT</a>
+                    <a href="/logs" class="text-[#FFAA00] text-[9px] font-black tracking-widest hover:bg-[#FFAA00] hover:text-black transition px-4 py-2 rounded-lg border border-[#FFAA00]/20 uppercase">Audit Log</a>
                 </div>
                 <div class="divide-y divide-slate-800/40">
                     ${logs.map(l => `
-                        <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
-                            <div class="text-[10px] mono text-slate-600 w-20 text-right">${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                            <div class="px-2 py-0.5 rounded text-[9px] font-black mono bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20">${l.action}</div>
-                            <div class="text-sm text-slate-400 truncate">${l.details}</div>
+                        <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-3">
+                            <div class="hidden md:block text-[10px] mono text-slate-600 w-16 text-right">${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20 shrink-0">${l.action}</div>
+                            <div class="text-[11px] md:text-sm text-slate-400 truncate">${l.details}</div>
                         </div>
                     `).join('')}
                 </div>
@@ -209,7 +211,7 @@ app.get('/', async (req, res) => {
                     const diff = parseInt(el.getAttribute('data-expire')) - Date.now();
                     if (diff <= 0) {
                         el.innerText = "LOCKED";
-                        el.className = "text-xs font-bold text-rose-500 mono";
+                        el.className = "text-xs font-bold text-rose-500 mono uppercase";
                     } else {
                         const m = Math.floor(diff / 60000);
                         const s = Math.floor((diff % 60000) / 1000);
@@ -223,12 +225,10 @@ app.get('/', async (req, res) => {
 });
 
 // FULL LOGS PAGE WITH SEARCH, FILTER, AND SERVER SORT
+// LOGS PAGE WITH RESPONSIVE TABLE :D
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    
     const allLogs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 100`).all();
-    
-    // Get unique server names for filter chips
     const uniqueServers = [...new Set(allLogs.map(l => l.guild_name).filter(Boolean))];
 
     res.send(`
@@ -236,53 +236,53 @@ app.get('/logs', async (req, res) => {
     ${getHead('Impulse | Audit Logs')}
     <body class="bg-[#0b0f1a] text-slate-200 p-4 md:p-8">
         <div class="max-w-5xl mx-auto">
-            <div class="flex justify-between items-end mb-8">
+            <div class="flex flex-col md:flex-row md:justify-between md:items-end mb-8 gap-4">
                 <div>
-                    <a href="/" class="text-[#FFAA00] text-[10px] font-black tracking-[0.2em] hover:underline">← BACK TO TERMINAL</a>
-                    <h1 class="text-4xl font-black text-white mt-2 leading-none uppercase italic">Data Logs</h1>
+                    <a href="/" class="text-[#FFAA00] text-[9px] font-black tracking-[0.2em] hover:underline uppercase">← Terminal Hub</a>
+                    <h1 class="text-3xl md:text-4xl font-black text-white mt-1 leading-none uppercase italic">Data Archive</h1>
                 </div>
-                <input type="text" id="logSearch" placeholder="Filter details..." class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition w-48 lg:w-64">
+                <input type="text" id="logSearch" placeholder="Search archive..." class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition w-full md:w-64">
             </div>
 
-            <div class="space-y-4 mb-8">
+            <div class="space-y-6 mb-8">
                 <div>
-                    <p class="text-[9px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Action Type</p>
-                    <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                        <button onclick="filterType('ALL')" class="type-btn bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[10px] font-black uppercase">ALL</button>
-                        <button onclick="filterType('SETUP')" class="type-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">SETUP</button>
-                        <button onclick="filterType('LOCK')" class="type-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">LOCK</button>
-                        <button onclick="filterType('DUPLICATE')" class="type-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">DUPLICATE</button>
+                    <p class="text-[8px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Filter: Action</p>
+                    <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                        <button onclick="filterType('ALL')" class="type-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL</button>
+                        <button onclick="filterType('SETUP')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">SETUP</button>
+                        <button onclick="filterType('LOCK')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">LOCK</button>
+                        <button onclick="filterType('DUPLICATE')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">DUPLICATE</button>
                     </div>
                 </div>
 
                 <div>
-                    <p class="text-[9px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Server Origin</p>
-                    <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                        <button onclick="filterServer('ALL')" class="srv-btn bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[10px] font-black uppercase">ALL SOURCES</button>
+                    <p class="text-[8px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Filter: Server</p>
+                    <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                        <button onclick="filterServer('ALL')" class="srv-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL SOURCES</button>
                         ${uniqueServers.map(srv => `
-                            <button onclick="filterServer('${srv}')" class="srv-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">${srv}</button>
+                            <button onclick="filterServer('${srv}')" class="srv-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">${srv}</button>
                         `).join('')}
                     </div>
                 </div>
             </div>
 
-            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-sm">
-                <table class="w-full text-left border-collapse">
-                    <thead class="bg-black/40 text-[10px] uppercase font-black tracking-widest text-slate-500">
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-x-auto backdrop-blur-sm shadow-xl">
+                <table class="w-full text-left border-collapse min-w-[600px] md:min-w-0">
+                    <thead class="bg-black/40 text-[9px] uppercase font-black tracking-widest text-slate-500">
                         <tr>
                             <th class="p-4 border-b border-slate-800">Origin</th>
                             <th class="p-4 border-b border-slate-800">Action</th>
                             <th class="p-4 border-b border-slate-800">Details</th>
-                            <th class="p-4 border-b border-slate-800">Timestamp</th>
+                            <th class="p-4 border-b border-slate-800">Time</th>
                         </tr>
                     </thead>
-                    <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-xs">
+                    <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
                         ${allLogs.map(l => `
                             <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name}">
                                 <td class="p-4 text-slate-300 font-sans font-bold">${l.guild_name || 'N/A'}</td>
                                 <td class="p-4"><span class="bg-[#FFAA00]/10 text-[#FFAA00] px-2 py-0.5 rounded border border-[#FFAA00]/20 font-black">${l.action}</span></td>
-                                <td class="p-4 text-slate-400 font-sans">${l.details}</td>
-                                <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'})}</td>
+                                <td class="p-4 text-slate-400 font-sans truncate max-w-[200px] md:max-w-none">${l.details}</td>
+                                <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}</td>
                             </tr>
                         `).join('')}
                     </tbody>
