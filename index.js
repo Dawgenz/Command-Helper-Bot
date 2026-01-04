@@ -139,6 +139,49 @@ app.get('/', async (req, res) => {
     </body></html>`);
 });
 
+app.get('/logs', async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+
+    const allLogs = db.prepare(`
+        SELECT audit_logs.*, guild_settings.guild_name 
+        FROM audit_logs 
+        LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
+        ORDER BY timestamp DESC LIMIT 100
+    `).all();
+
+    res.send(`
+        <html>
+        <head><script src="https://cdn.tailwindcss.com"></script></head>
+        <body class="bg-slate-900 text-slate-200 p-8">
+            <div class="max-w-4xl mx-auto">
+                <a href="/" class="text-sky-400 hover:underline text-sm">← Back to Dashboard</a>
+                <h1 class="text-3xl font-bold text-white mt-4 mb-8">Audit History</h1>
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-700 text-slate-300 text-xs uppercase">
+                            <tr>
+                                <th class="p-4">Server</th>
+                                <th class="p-4">Action</th>
+                                <th class="p-4">Details</th>
+                                <th class="p-4">Time</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700">
+                            ${allLogs.map(l => `
+                                <tr class="hover:bg-slate-750 transition">
+                                    <td class="p-4 font-semibold">${l.guild_name || 'Unknown'}</td>
+                                    <td class="p-4"><span class="px-2 py-1 rounded bg-slate-900 text-sky-400 text-xs">${l.action}</span></td>
+                                    <td class="p-4 text-sm text-slate-400">${l.details}</td>
+                                    <td class="p-4 text-xs text-slate-500">${new Date(l.timestamp).toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </body></html>`);
+});
+
 app.listen(3000, '0.0.0.0');
 
 // --- BOT EVENTS ---
