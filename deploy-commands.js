@@ -6,6 +6,11 @@ const commands = [
     new SlashCommandBuilder()
         .setName('resolved')
         .setDescription('Marks this thread as resolved and locks it in 30 minutes'),
+    
+    // --- INFO COMMAND ---
+    new SlashCommandBuilder()
+        .setName('info')
+        .setDescription('Display stats about the bot and view active timers, roles, channels, and settings'),
 
     // --- DUPLICATE COMMAND ---
     new SlashCommandBuilder()
