@@ -11,20 +11,18 @@ const db = new Database('database.db');
 const app = express();
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers
     ]
 });
-
-// --- DB INIT ---
 db.prepare(`CREATE TABLE IF NOT EXISTS guild_settings (
-    guild_id TEXT PRIMARY KEY, 
+    guild_id TEXT PRIMARY KEY,
     guild_name TEXT,
-    forum_id TEXT, 
-    resolved_tag TEXT, 
-    duplicate_tag TEXT, 
+    forum_id TEXT,
+    resolved_tag TEXT,
+    duplicate_tag TEXT,
     helper_role_id TEXT
 )`).run();
 db.prepare('CREATE TABLE IF NOT EXISTS pending_locks (thread_id TEXT PRIMARY KEY, guild_id TEXT, lock_at INTEGER)').run();
@@ -58,7 +56,7 @@ app.use(session({
     secret: process.env.SESSION_SECRET || 'keyboard cat',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 } 
+    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
 }));
 app.use(passport.initialize());
 app.use(passport.session());
