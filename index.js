@@ -2,7 +2,6 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const Database = require('better-sqlite3');
 const express = require('express');
-const session = require('express-session');
 const passport = require('passport');
 const { Strategy } = require('passport-discord');
 const session = require('express-session');
