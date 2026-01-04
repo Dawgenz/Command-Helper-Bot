@@ -158,7 +158,13 @@ app.get('/', async (req, res) => {
         } catch (e) {}
     }
 
-    const logs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 10`).all();
+    // FIX: Changed JOIN to LEFT JOIN so logs show even if guild settings are missing
+    const logs = db.prepare(`
+        SELECT audit_logs.*, guild_settings.guild_name 
+        FROM audit_logs 
+        LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
+        ORDER BY timestamp DESC LIMIT 10
+    `).all();
 
     res.send(`
     <html>
@@ -184,7 +190,7 @@ app.get('/', async (req, res) => {
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                 ${authorizedGuilds.map(s => `
-                    <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-amber glow-amber">
+                    <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition shadow-lg">
                         <h3 class="text-[#FFAA00] uppercase text-[10px] font-black mb-4 tracking-widest opacity-80 truncate">${s.guild_name}</h3>
                         <div class="space-y-2">
                             ${s.timers.length > 0 ? s.timers.map(t => `
@@ -207,9 +213,19 @@ app.get('/', async (req, res) => {
                 </div>
                 <div class="divide-y divide-slate-800/40">
                     ${logs.map(l => `
-                        <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-3">
-                            <div class="hidden md:block text-[10px] mono text-slate-600 w-16 text-right">${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} border shrink-0">${l.action}</div>
+                        <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
+                            <div class="hidden md:block text-[10px] mono text-slate-600 w-16 text-right shrink-0">
+                                ${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </div>
+                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20 shrink-0">
+                                ${l.action}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-xs text-slate-300 truncate font-medium">${l.details}</p>
+                            </div>
+                            <div class="text-[9px] font-black text-slate-600 uppercase tracking-widest shrink-0">
+                                ${l.guild_name || 'System'}
+                            </div>
                         </div>
                     `).join('')}
                 </div>
@@ -236,17 +252,16 @@ app.get('/', async (req, res) => {
 
 // FULL LOGS PAGE WITH SEARCH, FILTER, AND SERVER SORT
 // LOGS PAGE WITH RESPONSIVE TABLE :D
-// LOGS PAGE WITH RESPONSIVE TABLE
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    
     const allLogs = db.prepare(`
         SELECT audit_logs.*, guild_settings.guild_name 
         FROM audit_logs 
         LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
-        ORDER BY timestamp DESC 
-        LIMIT 100
+        ORDER BY timestamp DESC LIMIT 100
     `).all();
-
+    
     const uniqueServers = [...new Set(allLogs.map(l => l.guild_name).filter(Boolean))];
 
     res.send(`
@@ -266,95 +281,86 @@ app.get('/logs', async (req, res) => {
                 <div>
                     <p class="text-[8px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Filter: Action</p>
                     <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                        <button onclick="filterType('ALL')" class="type-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL</button>
-                        <button onclick="filterType('SETUP')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">SETUP</button>
-                        <button onclick="filterType('LOCK')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">LOCK</button>
-                        <button onclick="filterType('DUPLICATE')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">DUPLICATE</button>
-                        <button onclick="filterType('RESOLVED')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">RESOLVED</button>
+                        <button onclick="filterType('ALL', this)" class="type-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL</button>
+                        <button onclick="filterType('SETUP', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">SETUP</button>
+                        <button onclick="filterType('LOCK', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">LOCK</button>
+                        <button onclick="filterType('RESOLVED', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">RESOLVED</button>
                     </div>
                 </div>
 
                 <div>
                     <p class="text-[8px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Filter: Server</p>
                     <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                        <button onclick="filterServer('ALL')" class="srv-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL SOURCES</button>
+                        <button onclick="filterServer('ALL', this)" class="srv-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL SOURCES</button>
                         ${uniqueServers.map(srv => `
-                            <button onclick="filterServer('${srv}')" class="srv-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">${srv}</button>
+                            <button onclick="filterServer('${srv}', this)" class="srv-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">${srv}</button>
                         `).join('')}
                     </div>
                 </div>
             </div>
 
             <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-sm shadow-xl">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[700px]">
-                        <thead class="bg-black/40 text-[9px] uppercase font-black tracking-widest text-slate-500">
-                            <tr>
-                                <th class="p-4 border-b border-slate-800">Origin</th>
-                                <th class="p-4 border-b border-slate-800">Action</th>
-                                <th class="p-4 border-b border-slate-800">Details</th>
-                                <th class="p-4 border-b border-slate-800 text-right">Timestamp</th>
-                            </tr>
-                        </thead>
-                        <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-black/40 text-[9px] uppercase font-black tracking-widest text-slate-500">
+                        <tr>
+                            <th class="p-4 border-b border-slate-800">Origin</th>
+                            <th class="p-4 border-b border-slate-800">Action</th>
+                            <th class="p-4 border-b border-slate-800">Details</th>
+                            <th class="p-4 border-b border-slate-800">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
                         ${allLogs.map(l => `
                             <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
                                 <td class="p-4 text-slate-500 font-bold uppercase text-[10px]">${l.guild_name || 'System'}</td>
                                 <td class="p-4">
-                                    <span class="${getActionColor(l.action)} px-2 py-0.5 rounded border font-black uppercase text-[9px]">
+                                    <span class="bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20 px-2 py-0.5 rounded font-black uppercase text-[9px]">
                                         ${l.action}
                                     </span>
                                 </td>
                                 <td class="p-4 text-slate-300 font-sans">${l.details}</td>
-                                <td class="p-4 text-right text-[10px] text-slate-600">
-                                    ${new Date(l.timestamp).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}
+                                <td class="p-4 text-[10px] text-slate-600">
+                                    ${new Date(l.timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}
                                 </td>
                             </tr>
                         `).join('')}
-                        </tbody>
-                    </table>
-                </div>
+                    </tbody>
+                </table>
             </div>
         </div>
-
         <script>
             let currentType = 'ALL';
             let currentServer = 'ALL';
-            const searchInput = document.getElementById('logSearch');
+            const search = document.getElementById('logSearch');
             const rows = document.querySelectorAll('.log-row');
 
             function applyFilters() {
-                const term = searchInput.value.toLowerCase();
+                const term = search.value.toLowerCase();
                 rows.forEach(row => {
                     const typeMatch = currentType === 'ALL' || row.getAttribute('data-action') === currentType;
                     const serverMatch = currentServer === 'ALL' || row.getAttribute('data-server') === currentServer;
                     const textMatch = row.innerText.toLowerCase().includes(term);
-                    
                     row.style.display = (typeMatch && serverMatch && textMatch) ? '' : 'none';
                 });
             }
 
-            searchInput.addEventListener('keyup', applyFilters);
+            search.addEventListener('keyup', applyFilters);
 
-            function filterType(type) {
+            function filterType(type, btn) {
                 currentType = type;
                 document.querySelectorAll('.type-btn').forEach(b => {
-                    b.classList.remove('bg-[#FFAA00]', 'text-black');
-                    b.classList.add('bg-slate-800', 'text-slate-400');
+                    b.className = "type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter";
                 });
-                event.currentTarget.classList.remove('bg-slate-800', 'text-slate-400');
-                event.currentTarget.classList.add('bg-[#FFAA00]', 'text-black');
+                btn.className = "type-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter";
                 applyFilters();
             }
 
-            function filterServer(srv) {
+            function filterServer(srv, btn) {
                 currentServer = srv;
                 document.querySelectorAll('.srv-btn').forEach(b => {
-                    b.classList.remove('bg-[#FFAA00]', 'text-black');
-                    b.classList.add('bg-slate-800', 'text-slate-400');
+                    b.className = "srv-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter";
                 });
-                event.currentTarget.classList.remove('bg-slate-800', 'text-slate-400');
-                event.currentTarget.classList.add('bg-[#FFAA00]', 'text-black');
+                btn.className = "srv-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter";
                 applyFilters();
             }
         </script>
