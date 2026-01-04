@@ -236,10 +236,17 @@ app.get('/', async (req, res) => {
 
 // FULL LOGS PAGE WITH SEARCH, FILTER, AND SERVER SORT
 // LOGS PAGE WITH RESPONSIVE TABLE :D
+// LOGS PAGE WITH RESPONSIVE TABLE
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    
-    const allLogs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 100`).all();
+    const allLogs = db.prepare(`
+        SELECT audit_logs.*, guild_settings.guild_name 
+        FROM audit_logs 
+        LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
+        ORDER BY timestamp DESC 
+        LIMIT 100
+    `).all();
+
     const uniqueServers = [...new Set(allLogs.map(l => l.guild_name).filter(Boolean))];
 
     res.send(`
@@ -263,6 +270,7 @@ app.get('/logs', async (req, res) => {
                         <button onclick="filterType('SETUP')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">SETUP</button>
                         <button onclick="filterType('LOCK')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">LOCK</button>
                         <button onclick="filterType('DUPLICATE')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">DUPLICATE</button>
+                        <button onclick="filterType('RESOLVED')" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">RESOLVED</button>
                     </div>
                 </div>
 
@@ -277,41 +285,46 @@ app.get('/logs', async (req, res) => {
                 </div>
             </div>
 
-            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-x-auto backdrop-blur-sm shadow-xl">
-                <table class="w-full text-left border-collapse min-w-[600px] md:min-w-0">
-                    <thead class="bg-black/40 text-[9px] uppercase font-black tracking-widest text-slate-500">
-                        <tr>
-                            <th class="p-4 border-b border-slate-800">Origin</th>
-                            <th class="p-4 border-b border-slate-800">Action</th>
-                            <th class="p-4 border-b border-slate-800">Details</th>
-                            <th class="p-4 border-b border-slate-800">Time</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-sm shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse min-w-[700px]">
+                        <thead class="bg-black/40 text-[9px] uppercase font-black tracking-widest text-slate-500">
+                            <tr>
+                                <th class="p-4 border-b border-slate-800">Origin</th>
+                                <th class="p-4 border-b border-slate-800">Action</th>
+                                <th class="p-4 border-b border-slate-800">Details</th>
+                                <th class="p-4 border-b border-slate-800 text-right">Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
                         ${allLogs.map(l => `
-                            <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name}">
-                                <td class="p-4 text-slate-300 font-sans font-bold">${l.guild_name || 'N/A'}</td>
+                            <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
+                                <td class="p-4 text-slate-500 font-bold uppercase text-[10px]">${l.guild_name || 'System'}</td>
                                 <td class="p-4">
-                                    <span class="${getActionColor(l.action)} px-2 py-0.5 rounded border font-black uppercase text-[10px]">
+                                    <span class="${getActionColor(l.action)} px-2 py-0.5 rounded border font-black uppercase text-[9px]">
                                         ${l.action}
                                     </span>
                                 </td>
-                                <td class="p-4 text-slate-400 font-sans truncate max-w-[200px] md:max-w-none">${l.details}</td>
-                                <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}</td>
+                                <td class="p-4 text-slate-300 font-sans">${l.details}</td>
+                                <td class="p-4 text-right text-[10px] text-slate-600">
+                                    ${new Date(l.timestamp).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}
+                                </td>
                             </tr>
                         `).join('')}
-                    </tbody>
-                </table>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
+
         <script>
             let currentType = 'ALL';
             let currentServer = 'ALL';
-            const search = document.getElementById('logSearch');
+            const searchInput = document.getElementById('logSearch');
             const rows = document.querySelectorAll('.log-row');
 
             function applyFilters() {
-                const term = search.value.toLowerCase();
+                const term = searchInput.value.toLowerCase();
                 rows.forEach(row => {
                     const typeMatch = currentType === 'ALL' || row.getAttribute('data-action') === currentType;
                     const serverMatch = currentServer === 'ALL' || row.getAttribute('data-server') === currentServer;
@@ -321,27 +334,27 @@ app.get('/logs', async (req, res) => {
                 });
             }
 
-            search.addEventListener('keyup', applyFilters);
+            searchInput.addEventListener('keyup', applyFilters);
 
             function filterType(type) {
                 currentType = type;
                 document.querySelectorAll('.type-btn').forEach(b => {
-                    b.classList.replace('bg-[#FFAA00]', 'bg-slate-800');
-                    b.classList.replace('text-black', 'text-slate-400');
+                    b.classList.remove('bg-[#FFAA00]', 'text-black');
+                    b.classList.add('bg-slate-800', 'text-slate-400');
                 });
-                event.target.classList.replace('bg-slate-800', 'bg-[#FFAA00]');
-                event.target.classList.replace('text-slate-400', 'text-black');
+                event.currentTarget.classList.remove('bg-slate-800', 'text-slate-400');
+                event.currentTarget.classList.add('bg-[#FFAA00]', 'text-black');
                 applyFilters();
             }
 
             function filterServer(srv) {
                 currentServer = srv;
                 document.querySelectorAll('.srv-btn').forEach(b => {
-                    b.classList.replace('bg-[#FFAA00]', 'bg-slate-800');
-                    b.classList.replace('text-black', 'text-slate-400');
+                    b.classList.remove('bg-[#FFAA00]', 'text-black');
+                    b.classList.add('bg-slate-800', 'text-slate-400');
                 });
-                event.target.classList.replace('bg-slate-800', 'bg-[#FFAA00]');
-                event.target.classList.replace('text-slate-400', 'text-black');
+                event.currentTarget.classList.remove('bg-slate-800', 'text-slate-400');
+                event.currentTarget.classList.add('bg-[#FFAA00]', 'text-black');
                 applyFilters();
             }
         </script>
