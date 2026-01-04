@@ -71,9 +71,11 @@ app.get('/logout', (req, res) => {
 // MAIN DASHBOARD
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
-        return res.send(`<html><script src="https://cdn.tailwindcss.com"></script><body class="bg-slate-900 text-white flex items-center justify-center h-screen"><div class="text-center p-10 bg-slate-800 rounded-2xl shadow-2xl border border-slate-700"><h1 class="text-4xl font-bold mb-6 text-sky-400">Impulse Bot Dashboard</h1><a href="/auth/discord" class="bg-indigo-600 hover:bg-indigo-500 transition px-8 py-3 rounded-lg font-bold text-lg inline-block">Login with Discord</a></div></body></html>`);
+        // ... (Login page stays mostly the same, just update the sky-400 to [#FFAA00])
+        return res.send(`<html><script src="https://cdn.tailwindcss.com"></script><body class="bg-slate-950 text-white flex items-center justify-center h-screen"><div class="text-center p-10 bg-slate-900 rounded-2xl shadow-2xl border border-[#FFAA00]/20"><h1 class="text-4xl font-bold mb-6 text-[#FFAA00]">Impulse Bot Dashboard</h1><a href="/auth/discord" class="bg-[#FFAA00] hover:bg-[#cc8800] text-black transition px-8 py-3 rounded-lg font-bold text-lg inline-block">Login with Discord</a></div></body></html>`);
     }
 
+    const botAvatar = client.user.displayAvatarURL();
     const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
     const authorizedGuilds = [];
 
@@ -83,8 +85,9 @@ app.get('/', async (req, res) => {
         try {
             const member = await guild.members.fetch(req.user.id);
             if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
-                const timers = db.prepare('SELECT COUNT(*) as count FROM pending_locks WHERE guild_id = ?').get(settings.guild_id).count;
-                authorizedGuilds.push({ ...settings, active_timers: timers });
+                // Fetch the actual timers for this guild
+                const timers = db.prepare('SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?').all(settings.guild_id);
+                authorizedGuilds.push({ ...settings, timers });
             }
         } catch (e) {}
     }
@@ -92,30 +95,78 @@ app.get('/', async (req, res) => {
     const logs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 8`).all();
 
     res.send(`
-    <html><head><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-slate-900 text-slate-200 min-h-screen p-8"><div class="max-w-6xl mx-auto">
-        <header class="flex justify-between items-center mb-10 text-white">
-            <h1 class="text-3xl font-extrabold text-white">Impulse Bot<span class="text-sky-400 text-xl font-medium ml-2">Dashboard</span></h1>
-            <div class="flex items-center gap-4 text-sm text-slate-400"><span>Logged as ${req.user.username}</span><a href="/logout" class="text-rose-400 hover:underline">Logout</a></div>
-        </header>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-            ${authorizedGuilds.map(s => `
-                <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                    <h3 class="text-slate-400 uppercase text-xs font-bold mb-2">${s.guild_name}</h3>
-                    <div class="text-4xl font-bold text-emerald-400">${s.active_timers}</div>
-                    <div class="text-sm text-slate-500 mt-1">Active Auto-Lock Timers</div>
-                </div>`).join('')}
-        </div>
-        <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
-            <div class="p-6 border-b border-slate-700 flex justify-between items-center">
-                <h2 class="text-xl font-bold text-white">Recent Activity</h2>
-                <a href="/logs" class="text-sky-400 text-sm hover:underline font-medium uppercase tracking-wider">Full Logs</a>
+    <html>
+    <head>
+        <title>Impulse Bot | Dashboard</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            .glow { box-shadow: 0 0 15px rgba(255, 170, 0, 0.1); }
+            .border-amber { border-color: rgba(255, 170, 0, 0.3); }
+        </style>
+    </head>
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-8">
+        <div class="max-w-6xl mx-auto">
+            <header class="flex justify-between items-center mb-10">
+                <div class="flex items-center gap-4">
+                    <img src="${botAvatar}" class="w-12 h-12 rounded-full border-2 border-[#FFAA00] shadow-[0_0_10px_#FFAA00]">
+                    <h1 class="text-3xl font-extrabold text-white tracking-tighter">IMPULSE <span class="text-[#FFAA00] text-xl font-mono ml-2">v2.0</span></h1>
+                </div>
+                <div class="flex items-center gap-4 text-sm font-medium">
+                    <span class="bg-slate-800 px-3 py-1 rounded-full border border-slate-700">Logged as ${req.user.username}</span>
+                    <a href="/logout" class="text-rose-500 hover:text-rose-400 transition">Logout</a>
+                </div>
+            </header>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                ${authorizedGuilds.map(s => `
+                    <div class="bg-slate-900/50 p-6 rounded-xl border border-amber glow">
+                        <h3 class="text-[#FFAA00] uppercase text-xs font-bold mb-4 tracking-widest">${s.guild_name}</h3>
+                        <div class="space-y-3">
+                            ${s.timers.length > 0 ? s.timers.map(t => `
+                                <div class="flex justify-between items-center bg-black/30 p-2 rounded border border-slate-800">
+                                    <span class="text-xs font-mono text-slate-400">#${t.thread_id.slice(-4)}</span>
+                                    <span class="text-xs font-bold text-emerald-400" data-expire="${t.lock_at}">Calculating...</span>
+                                </div>
+                            `).join('') : '<div class="text-slate-600 text-xs italic">No active timers</div>'}
+                        </div>
+                    </div>`).join('')}
             </div>
-            <div class="divide-y divide-slate-700">
-                ${logs.map(l => `<div class="p-4 hover:bg-slate-750 transition text-sm"><span class="text-sky-500 font-mono text-xs uppercase mr-4">${l.action}</span><span class="text-slate-300">${l.details}</span></div>`).join('')}
+
+            <div class="bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden shadow-2xl">
+                <div class="p-6 border-b border-slate-800 flex justify-between items-center">
+                    <h2 class="text-xl font-bold text-white">Audit Log Feed</h2>
+                    <a href="/logs" class="bg-[#FFAA00]/10 text-[#FFAA00] px-4 py-1 rounded hover:bg-[#FFAA00]/20 transition text-xs font-bold">VIEW ALL</a>
+                </div>
+                <div class="divide-y divide-slate-800/50 font-mono">
+                    ${logs.map(l => `<div class="p-4 hover:bg-[#FFAA00]/5 transition text-sm flex gap-4">
+                        <span class="text-[#FFAA00] opacity-50 text-xs">[${new Date(l.timestamp).toLocaleTimeString()}]</span>
+                        <span class="text-[#FFAA00] font-bold underline decoration-dotted">${l.action}</span>
+                        <span class="text-slate-400">${l.details}</span>
+                    </div>`).join('')}
+                </div>
             </div>
         </div>
-    </div></body></html>`);
+
+        <script>
+            function updateTimers() {
+                document.querySelectorAll('[data-expire]').forEach(el => {
+                    const expire = parseInt(el.getAttribute('data-expire'));
+                    const now = Date.now();
+                    const diff = expire - now;
+                    if (diff <= 0) {
+                        el.innerText = "LOCKING...";
+                        el.classList.replace('text-emerald-400', 'text-rose-500');
+                    } else {
+                        const mins = Math.floor(diff / 60000);
+                        const secs = Math.floor((diff % 60000) / 1000);
+                        el.innerText = mins + "m " + secs + "s";
+                    }
+                });
+            }
+            setInterval(updateTimers, 1000);
+            updateTimers();
+        </script>
+    </body></html>`);
 });
 
 // FULL LOGS PAGE
