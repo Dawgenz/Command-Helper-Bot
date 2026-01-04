@@ -102,8 +102,8 @@ app.get('/', async (req, res) => {
                     <div class="inline-block p-4 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_20px_rgba(255,170,0,0.3)] mb-4 animate-pulse">
                         <img src="${client.user.displayAvatarURL()}" class="w-16 h-16 rounded-full">
                     </div>
-                    <h1 class="text-4xl font-black tracking-tighter text-white uppercase italic">Impulse <span class="text-[#FFAA00]">OS</span></h1>
-                    <p class="text-slate-500 text-[10px] mt-2 uppercase tracking-[0.2em]">Automated Thread Management System</p>
+                    <h1 class="text-4xl font-black tracking-tighter text-white uppercase">Impulse <span class="text-[#FFAA00]">OS</span></h1>
+                    <p class="text-slate-500 text-[10px] mt-2 uppercase tracking-[0.2em]">Improving Quality of Life and More!</p>
                 </div>
                 
                 <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl backdrop-blur-md relative overflow-hidden">
