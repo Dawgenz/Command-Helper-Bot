@@ -371,11 +371,13 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.commandName === 'setup') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply("Admins only.");
             
-            // Use the new helper methods to get IDs directly
             const forum = interaction.options.getChannel('forum');
-            const helperRole = interaction.options.getRole('helper_role');
             const resTag = interaction.options.getString('resolved_tag');
             const dupTag = interaction.options.getString('duplicate_tag');
+            
+            // CLEANING LOGIC: This removes all spaces and ensures it's just IDs and commas
+            const rawRoles = interaction.options.getString('helper_roles');
+            const cleanRoles = rawRoles.replace(/\s+/g, ''); 
 
             db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(
                 interaction.guildId, 
@@ -383,15 +385,16 @@ client.on('interactionCreate', async (interaction) => {
                 forum.id, 
                 resTag, 
                 dupTag, 
-                helperRole.id
+                cleanRoles
             );
 
-            logAction(interaction.guildId, 'SETUP', `Smart Setup: Forum #${forum.name}, Role @${helperRole.name}`);
+            logAction(interaction.guildId, 'SETUP', `Setup updated with Roles: ${cleanRoles}`);
+            
             return interaction.reply({ 
-                content: `✅ **Setup Complete!**\nMonitoring: <#${forum.id}>\nHelper Role: <@&${helperRole.id}>`, 
+                content: `✅ **Setup Complete!**\nMonitoring: <#${forum.id}>\nHelpers: ${cleanRoles.split(',').map(id => `<@&${id}>`).join(' ')}`, 
                 ephemeral: true 
             });
-      }
+    }
 
     if (interaction.commandName === 'info') {
         if (!settings) return interaction.reply("❌ This server is not set up.");

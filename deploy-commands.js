@@ -26,18 +26,15 @@ const commands = [
         .setName('setup')
         .setDescription('Configure the bot for this specific server')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        // SMART: This opens a channel picker filtered to Forums only
         .addChannelOption(option => 
             option.setName('forum')
                 .setDescription('Select the Forum channel')
                 .addChannelTypes(ChannelType.GuildForum) 
                 .setRequired(true))
-        // SMART: This opens a role picker
-        .addRoleOption(option => 
-            option.setName('helper_role')
-                .setDescription('Select the Helper role')
+        .addStringOption(option => 
+            option.setName('helper_roles')
+                .setDescription('Paste Role IDs separated by commas (e.g. 123, 456)')
                 .setRequired(true))
-        // Tags are still strings because they are internal to the forum settings
         .addStringOption(option => 
             option.setName('resolved_tag')
                 .setDescription('The ID of the Resolved tag')
