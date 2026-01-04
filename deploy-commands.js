@@ -20,23 +20,11 @@ const commands = [
     new SlashCommandBuilder()
         .setName('setup')
         .setDescription('Configure the bot for this specific server')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // Only Admins see this
-        .addStringOption(option => 
-            option.setName('forum_id')
-                .setDescription('The ID of the Forum channel')
-                .setRequired(true))
-        .addStringOption(option => 
-            option.setName('resolved_tag')
-                .setDescription('The ID of the Resolved tag')
-                .setRequired(true))
-        .addStringOption(option => 
-            option.setName('duplicate_tag')
-                .setDescription('The ID of the Duplicate tag')
-                .setRequired(true))
-        .addRoleOption(option => 
-            option.setName('helper_role')
-                .setDescription('Role allowed to use staff commands (like /duplicate)')
-                .setRequired(true)),
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(option => option.setName('forum_id').setDescription('The ID of the Forum channel').setRequired(true))
+        .addStringOption(option => option.setName('resolved_tag').setDescription('The ID of the Resolved tag').setRequired(true))
+        .addStringOption(option => option.setName('duplicate_tag').setDescription('The ID of the Duplicate tag').setRequired(true))
+        .addStringOption(option => option.setName('helper_roles').setDescription('Comma-separated IDs of roles (e.g. 123,456,789)').setRequired(true)),
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

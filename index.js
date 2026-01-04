@@ -1,7 +1,10 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const Database = require('better-sqlite3');
 const express = require('express');
+const session = require('express-session');
+const passport = require('passport');
+const { Strategy } = require('passport-discord');
 
 const db = new Database('database.db');
 const app = express();
@@ -25,18 +28,88 @@ db.prepare('CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOIN
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
 const logAction = (guildId, action, details) => db.prepare('INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)').run(guildId, action, details);
 
-// --- DASHBOARD ---
-app.get('/', (req, res) => {
-    const stats = db.prepare(`SELECT guild_name, (SELECT COUNT(*) FROM pending_locks WHERE pending_locks.guild_id = guild_settings.guild_id) as active_timers FROM guild_settings`).all();
-    const logs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 10`).all();
-    res.send(`<html><head><title>Impulse Dashboard</title><style>body{font-family:sans-serif;background:#0f172a;color:#f8fafc;padding:40px;} .card{background:#1e293b;padding:20px;border-radius:10px;margin-bottom:20px;border:1px solid #334155;} .log{font-size:0.9rem;border-bottom:1px solid #334155;padding:5px 0;} h1,h2{color:#38bdf8;}</style></head><body><h1>Mission Control</h1><div style="display:flex;gap:20px;">${stats.map(s=>`<div class="card"><h3>${s.guild_name}</h3><div style="font-size:2rem;color:#10b981;">${s.active_timers}</div>Active Timers</div>`).join('')}</div><div class="card"><h2>Recent Activity</h2>${logs.map(l=>`<div class="log"><strong style="color:#38bdf8;">${l.guild_name}</strong>: ${l.details}</div>`).join('')}</div></body></html>`);
+// Check if user has one of the allowed roles
+const hasHelperRole = (member, settings) => {
+    if (!settings || !settings.helper_role_id) return false;
+    const allowedRoles = settings.helper_role_id.split(',');
+    return member.roles.cache.some(role => allowedRoles.includes(role.id));
+};
+
+// --- PASSPORT / OAUTH2 CONFIG ---
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((obj, done) => done(null, obj));
+
+passport.use(new Strategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: process.env.REDIRECT_URI,
+    scope: ['identify', 'guilds', 'guilds.members.read']
+}, (accessToken, refreshToken, profile, done) => {
+    process.nextTick(() => done(null, profile));
+}));
+
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'keyboard cat',
+    resave: false,
+    saveUninitialized: false
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+
+// --- AUTH ROUTES ---
+app.get('/auth/discord', passport.authenticate('discord'));
+app.get('/auth/discord/callback', passport.authenticate('discord', { failureRedirect: '/' }), (req, res) => res.redirect('/'));
+app.get('/logout', (req, res) => {
+    req.logout(() => res.redirect('/'));
 });
+
+// --- DASHBOARD (PROTECTED) ---
+app.get('/', async (req, res) => {
+    if (!req.isAuthenticated()) {
+        return res.send(`<html><body style="background:#0f172a;color:white;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;">
+            <div style="text-align:center;"><h1>Impulse Dashboard</h1><a href="/auth/discord" style="background:#5865F2;color:white;padding:15px 25px;border-radius:5px;text-decoration:none;font-weight:bold;">Login with Discord</a></div>
+        </body></html>`);
+    }
+
+    // Filter servers: Only show those where the user is an Admin or has a Helper Role
+    const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
+    const authorizedGuilds = [];
+
+    for (const settings of allSettings) {
+        try {
+            const guild = await client.guilds.fetch(settings.guild_id);
+            const member = await guild.members.fetch(req.user.id);
+            
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
+                const activeTimers = db.prepare('SELECT COUNT(*) as count FROM pending_locks WHERE guild_id = ?').get(settings.guild_id).count;
+                authorizedGuilds.push({ ...settings, active_timers: activeTimers });
+            }
+        } catch (e) { /* User not in this guild or fetch failed */ }
+    }
+
+    const logs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 10`).all();
+
+    res.send(`<html><head><title>Impulse Dashboard</title><style>body{font-family:sans-serif;background:#0f172a;color:#f8fafc;padding:40px;} .card{background:#1e293b;padding:20px;border-radius:10px;margin-bottom:20px;border:1px solid #334155;} .log{font-size:0.9rem;border-bottom:1px solid #334155;padding:5px 0;} h1,h2{color:#38bdf8;} .btn-logout{float:right;color:#ef4444;text-decoration:none;font-size:0.9rem;}</style></head><body>
+        <a href="/logout" class="btn-logout">Logout</a>
+        <h1>Mission Control</h1>
+        <p>Logged in as: <strong>${req.user.username}</strong></p>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+            ${authorizedGuilds.length > 0 ? authorizedGuilds.map(s => `
+                <div class="card">
+                    <h3>${s.guild_name}</h3>
+                    <div style="font-size:2rem;color:#10b981;">${s.active_timers}</div>
+                    Active Timers
+                </div>`).join('') : '<p>No servers found where you have staff permissions.</p>'}
+        </div>
+        <div class="card"><h2>Recent Activity</h2>${logs.map(l => `<div class="log"><strong style="color:#38bdf8;">${l.guild_name}</strong>: ${l.details}</div>`).join('')}</div>
+    </body></html>`);
+});
+
 app.listen(3000, '0.0.0.0');
 
 // --- BOT EVENTS ---
 client.once('ready', () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    // Auto-lock checker
     setInterval(async () => {
         const rows = db.prepare('SELECT * FROM pending_locks WHERE lock_at <= ?').all(Date.now());
         for (const row of rows) {
@@ -56,7 +129,6 @@ client.once('ready', () => {
     }, 60000);
 });
 
-// Dynamic Greeting
 client.on('threadCreate', async (thread) => {
     const settings = getSettings(thread.guildId);
     if (!settings || thread.parentId !== settings.forum_id) return;
@@ -77,14 +149,14 @@ client.on('interactionCreate', async (interaction) => {
             const forumId = interaction.options.getString('forum_id');
             const resTag = interaction.options.getString('resolved_tag');
             const dupTag = interaction.options.getString('duplicate_tag');
-            const roleId = interaction.options.getRole('helper_role').id;
+            const rolesString = interaction.options.getString('helper_roles').replace(/\s/g, '');
 
-            db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(interaction.guildId, interaction.guild.name, forumId, resTag, dupTag, roleId);
-            logAction(interaction.guildId, 'SETUP', 'Updated configuration');
-            return interaction.reply("✅ Server configuration updated!");
+            db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(interaction.guildId, interaction.guild.name, forumId, resTag, dupTag, rolesString);
+            logAction(interaction.guildId, 'SETUP', `Updated config with roles: ${rolesString}`);
+            return interaction.reply("✅ Server configuration updated successfully!");
         }
 
-        if (!settings) return interaction.reply({ content: "Please run `/setup` first to configure this server.", ephemeral: true });
+        if (!settings) return interaction.reply({ content: "Please run `/setup` first.", ephemeral: true });
 
         if (interaction.commandName === 'resolved') {
             const lockTime = Date.now() + (30 * 60 * 1000);
@@ -94,7 +166,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.commandName === 'duplicate') {
-            if (!interaction.member.roles.cache.has(settings.helper_role_id)) return interaction.reply("Missing Helper Role.");
+            if (!hasHelperRole(interaction.member, settings)) return interaction.reply("You do not have a Helper Role.");
             const link = interaction.options.getString('link');
             await interaction.channel.setAppliedTags([settings.duplicate_tag]);
             await interaction.reply({ embeds: [new EmbedBuilder().setTitle("Duplicate").setDescription(`Addressed here: ${link}`).setColor(0xFFA500)] });
