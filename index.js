@@ -95,7 +95,7 @@ app.get('/', async (req, res) => {
     <html><head><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-slate-900 text-slate-200 min-h-screen p-8"><div class="max-w-6xl mx-auto">
         <header class="flex justify-between items-center mb-10 text-white">
-            <h1 class="text-3xl font-extrabold text-white">Impulse <span class="text-sky-400 text-xl font-medium ml-2">Mission Control</span></h1>
+            <h1 class="text-3xl font-extrabold text-white">Impulse Bot<span class="text-sky-400 text-xl font-medium ml-2">Dashboard</span></h1>
             <div class="flex items-center gap-4 text-sm text-slate-400"><span>Logged as ${req.user.username}</span><a href="/logout" class="text-rose-400 hover:underline">Logout</a></div>
         </header>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
