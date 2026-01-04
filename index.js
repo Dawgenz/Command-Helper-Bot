@@ -32,11 +32,11 @@ db.prepare('CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOIN
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
 const logAction = (guildId, action, details) => db.prepare('INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)').run(guildId, action, details);
 
-const hasHelperRole = (member, settings) => {
-    if (!settings || !settings.helper_role_id) return false;
-    const allowedRoles = settings.helper_role_id.split(',');
-    return member.roles.cache.some(role => allowedRoles.includes(role.id));
-};
+function hasHelperRole(member, settings) {
+    if (!settings.helper_role_id) return false;
+    const roleIDs = settings.helper_role_id.split(',').map(id => id.trim());
+    return member.roles.cache.some(role => roleIDs.includes(role.id));
+}
 
 // --- PASSPORT / OAUTH2 CONFIG ---
 passport.serializeUser((user, done) => done(null, user));
@@ -369,16 +369,29 @@ client.on('interactionCreate', async (interaction) => {
     const settings = getSettings(interaction.guildId);
 
     if (interaction.commandName === 'setup') {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply("Admins only.");
-        const forumId = interaction.options.getString('forum_id');
-        const resTag = interaction.options.getString('resolved_tag');
-        const dupTag = interaction.options.getString('duplicate_tag');
-        const rolesString = interaction.options.getString('helper_roles').replace(/\s/g, '');
+            if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply("Admins only.");
+            
+            // Use the new helper methods to get IDs directly
+            const forum = interaction.options.getChannel('forum');
+            const helperRole = interaction.options.getRole('helper_role');
+            const resTag = interaction.options.getString('resolved_tag');
+            const dupTag = interaction.options.getString('duplicate_tag');
 
-        db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(interaction.guildId, interaction.guild.name, forumId, resTag, dupTag, rolesString);
-        logAction(interaction.guildId, 'SETUP', `Updated config with roles: ${rolesString}`);
-        return interaction.reply("✅ Server configuration updated successfully!");
-    }
+            db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(
+                interaction.guildId, 
+                interaction.guild.name, 
+                forum.id, 
+                resTag, 
+                dupTag, 
+                helperRole.id
+            );
+
+            logAction(interaction.guildId, 'SETUP', `Smart Setup: Forum #${forum.name}, Role @${helperRole.name}`);
+            return interaction.reply({ 
+                content: `✅ **Setup Complete!**\nMonitoring: <#${forum.id}>\nHelper Role: <@&${helperRole.id}>`, 
+                ephemeral: true 
+            });
+      }
 
     if (interaction.commandName === 'info') {
         if (!settings) return interaction.reply("❌ This server is not set up.");
@@ -395,13 +408,37 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply("✅ Thread marked as **Resolved**. Locking in 30 minutes.");
     }
 
-    if (interaction.commandName === 'duplicate') {
-        if (!hasHelperRole(interaction.member, settings)) return interaction.reply("You do not have a Helper Role.");
-        const link = interaction.options.getString('link');
-        await interaction.channel.setAppliedTags([settings.duplicate_tag]);
-        await interaction.reply({ embeds: [new EmbedBuilder().setTitle("Duplicate").setDescription(`Addressed here: ${link}`).setColor(0xFFA500)] });
-        await interaction.channel.setLocked(true);
-        logAction(interaction.guildId, 'DUPLICATE', `Closed duplicate: ${interaction.channel.name}`);
+  if (interaction.commandName === 'duplicate') {
+          // Check if user is Admin OR has the Helper Role
+          const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+          const isHelper = hasHelperRole(interaction.member, settings);
+
+          if (!isAdmin && !isHelper) {
+              return interaction.reply({ 
+                  content: "❌ Access Denied. You need a **Helper Role** or **Administrator** permissions.", 
+                  ephemeral: true 
+              });
+          }
+
+          const link = interaction.options.getString('link');
+          
+          try {
+              // Apply duplicate tag and lock
+              await interaction.channel.setAppliedTags([settings.duplicate_tag]);
+              await interaction.reply({ 
+                  embeds: [new EmbedBuilder()
+                      .setTitle("Thread Closed: Duplicate")
+                      .setDescription(`This topic has already been addressed here: ${link}`)
+                      .setColor(0xFFA500)
+                      .setTimestamp()] 
+              });
+              
+              await interaction.channel.setLocked(true);
+              logAction(interaction.guildId, 'DUPLICATE', `Closed duplicate: ${interaction.channel.name}`);
+          } catch (e) {
+              console.error(e);
+              interaction.followUp({ content: "Failed to apply tags/lock. Check bot permissions.", ephemeral: true });
+          }
     }
 });
 

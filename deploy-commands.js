@@ -1,4 +1,4 @@
-const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 require('dotenv').config();
 
 const commands = [
@@ -21,15 +21,31 @@ const commands = [
                 .setDescription('Link to the original post')
                 .setRequired(true)),
 
-    // --- NEW SETUP COMMAND ---
+    // --- SMART SETUP COMMAND ---
     new SlashCommandBuilder()
         .setName('setup')
         .setDescription('Configure the bot for this specific server')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(option => option.setName('forum_id').setDescription('The ID of the Forum channel').setRequired(true))
-        .addStringOption(option => option.setName('resolved_tag').setDescription('The ID of the Resolved tag').setRequired(true))
-        .addStringOption(option => option.setName('duplicate_tag').setDescription('The ID of the Duplicate tag').setRequired(true))
-        .addStringOption(option => option.setName('helper_roles').setDescription('Comma-separated IDs of roles (e.g. 123,456,789)').setRequired(true)),
+        // SMART: This opens a channel picker filtered to Forums only
+        .addChannelOption(option => 
+            option.setName('forum')
+                .setDescription('Select the Forum channel')
+                .addChannelTypes(ChannelType.GuildForum) 
+                .setRequired(true))
+        // SMART: This opens a role picker
+        .addRoleOption(option => 
+            option.setName('helper_role')
+                .setDescription('Select the Helper role')
+                .setRequired(true))
+        // Tags are still strings because they are internal to the forum settings
+        .addStringOption(option => 
+            option.setName('resolved_tag')
+                .setDescription('The ID of the Resolved tag')
+                .setRequired(true))
+        .addStringOption(option => 
+            option.setName('duplicate_tag')
+                .setDescription('The ID of the Duplicate tag')
+                .setRequired(true)),
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
