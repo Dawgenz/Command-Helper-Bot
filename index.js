@@ -158,7 +158,6 @@ app.get('/', async (req, res) => {
         } catch (e) {}
     }
 
-    // FIX: Changed JOIN to LEFT JOIN so logs show even if guild settings are missing
     const logs = db.prepare(`
         SELECT audit_logs.*, guild_settings.guild_name 
         FROM audit_logs 
@@ -217,7 +216,7 @@ app.get('/', async (req, res) => {
                             <div class="hidden md:block text-[10px] mono text-slate-600 w-16 text-right shrink-0">
                                 ${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                             </div>
-                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20 shrink-0">
+                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} shrink-0">
                                 ${l.action}
                             </div>
                             <div class="flex-1 min-w-0">
@@ -250,7 +249,6 @@ app.get('/', async (req, res) => {
     </body></html>`);
 });
 
-// FULL LOGS PAGE WITH SEARCH, FILTER, AND SERVER SORT
 // LOGS PAGE WITH RESPONSIVE TABLE :D
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
@@ -285,6 +283,8 @@ app.get('/logs', async (req, res) => {
                         <button onclick="filterType('SETUP', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">SETUP</button>
                         <button onclick="filterType('LOCK', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">LOCK</button>
                         <button onclick="filterType('RESOLVED', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">RESOLVED</button>
+                        <button onclick="filterType('DUPLICATE', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">DUPLICATE</button>
+                        <button onclick="filterType('GREET', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">GREET</button>
                     </div>
                 </div>
 
@@ -314,7 +314,7 @@ app.get('/logs', async (req, res) => {
                             <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
                                 <td class="p-4 text-slate-500 font-bold uppercase text-[10px]">${l.guild_name || 'System'}</td>
                                 <td class="p-4">
-                                    <span class="bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20 px-2 py-0.5 rounded font-black uppercase text-[9px]">
+                                    <span class="${getActionColor(l.action)} px-2 py-0.5 rounded font-black uppercase text-[9px]">
                                         ${l.action}
                                     </span>
                                 </td>

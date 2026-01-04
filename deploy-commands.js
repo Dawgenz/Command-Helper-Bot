@@ -50,9 +50,6 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 (async () => {
     try {
         console.log('Started refreshing application (/) commands.');
-
-        // Option A: REGISTER GLOBALLY (Recommended for multiple servers)
-        // This makes the commands available in EVERY server the bot is in.
         await rest.put(
             Routes.applicationCommands(process.env.CLIENT_ID),
             { body: commands },
