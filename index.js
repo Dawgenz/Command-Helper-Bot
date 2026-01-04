@@ -73,7 +73,7 @@ app.get('/logout', (req, res) => {
 // MAIN DASHBOARD
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
-        return res.send(`<html><script src="https://cdn.tailwindcss.com"></script><body class="bg-slate-900 text-white flex items-center justify-center h-screen"><div class="text-center p-10 bg-slate-800 rounded-2xl shadow-2xl border border-slate-700"><h1 class="text-4xl font-bold mb-6 text-sky-400">Impulse Mission Control</h1><a href="/auth/discord" class="bg-indigo-600 hover:bg-indigo-500 transition px-8 py-3 rounded-lg font-bold text-lg inline-block">Login with Discord</a></div></body></html>`);
+        return res.send(`<html><script src="https://cdn.tailwindcss.com"></script><body class="bg-slate-900 text-white flex items-center justify-center h-screen"><div class="text-center p-10 bg-slate-800 rounded-2xl shadow-2xl border border-slate-700"><h1 class="text-4xl font-bold mb-6 text-sky-400">Impulse Bot Dashboard</h1><a href="/auth/discord" class="bg-indigo-600 hover:bg-indigo-500 transition px-8 py-3 rounded-lg font-bold text-lg inline-block">Login with Discord</a></div></body></html>`);
     }
 
     const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
