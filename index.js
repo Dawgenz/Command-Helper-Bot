@@ -90,6 +90,17 @@ const getHead = (title) => `
     </head>
 `;
 
+const getActionColor = (action) => {
+    const colors = {
+        'SETUP': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
+        'DUPLICATE': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+        'RESOLVED': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+        'LOCK': 'bg-rose-500/10 text-rose-500 border-rose-500/20',
+        'GREET': 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+    };
+    return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
+};
+
 // MAIN DASHBOARD
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
@@ -198,8 +209,7 @@ app.get('/', async (req, res) => {
                     ${logs.map(l => `
                         <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-3">
                             <div class="hidden md:block text-[10px] mono text-slate-600 w-16 text-right">${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono bg-[#FFAA00]/10 text-[#FFAA00] border border-[#FFAA00]/20 shrink-0">${l.action}</div>
-                            <div class="text-[11px] md:text-sm text-slate-400 truncate">${l.details}</div>
+                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} border shrink-0">${l.action}</div>
                         </div>
                     `).join('')}
                 </div>
@@ -280,7 +290,11 @@ app.get('/logs', async (req, res) => {
                         ${allLogs.map(l => `
                             <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name}">
                                 <td class="p-4 text-slate-300 font-sans font-bold">${l.guild_name || 'N/A'}</td>
-                                <td class="p-4"><span class="bg-[#FFAA00]/10 text-[#FFAA00] px-2 py-0.5 rounded border border-[#FFAA00]/20 font-black">${l.action}</span></td>
+                                <td class="p-4">
+                                    <span class="${getActionColor(l.action)} px-2 py-0.5 rounded border font-black uppercase text-[10px]">
+                                        ${l.action}
+                                    </span>
+                                </td>
                                 <td class="p-4 text-slate-400 font-sans truncate max-w-[200px] md:max-w-none">${l.details}</td>
                                 <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}</td>
                             </tr>
