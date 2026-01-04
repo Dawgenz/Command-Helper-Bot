@@ -238,6 +238,7 @@ app.get('/', async (req, res) => {
 // LOGS PAGE WITH RESPONSIVE TABLE :D
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    
     const allLogs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 100`).all();
     const uniqueServers = [...new Set(allLogs.map(l => l.guild_name).filter(Boolean))];
 
@@ -287,30 +288,18 @@ app.get('/logs', async (req, res) => {
                         </tr>
                     </thead>
                     <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
-                    ${logs.map(l => `
-                        <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
-                            <div class="hidden md:block text-[10px] mono text-slate-600 w-16 text-right shrink-0">
-                                ${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </div>
-                            
-                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} border shrink-0">
-                                ${l.action}
-                            </div>
-
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs text-slate-300 truncate font-medium">
-                                    ${l.details}
-                                </p>
-                                <p class="md:hidden text-[9px] text-slate-500 uppercase tracking-tighter mt-0.5 font-bold">
-                                    ${l.guild_name}
-                                </p>
-                            </div>
-
-                            <div class="hidden md:block text-[9px] font-black text-slate-500 uppercase tracking-widest shrink-0">
-                                ${l.guild_name}
-                            </div>
-                        </div>
-                    `).join('')}
+                        ${allLogs.map(l => `
+                            <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name}">
+                                <td class="p-4 text-slate-300 font-sans font-bold">${l.guild_name || 'N/A'}</td>
+                                <td class="p-4">
+                                    <span class="${getActionColor(l.action)} px-2 py-0.5 rounded border font-black uppercase text-[10px]">
+                                        ${l.action}
+                                    </span>
+                                </td>
+                                <td class="p-4 text-slate-400 font-sans truncate max-w-[200px] md:max-w-none">${l.details}</td>
+                                <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}</td>
+                            </tr>
+                        `).join('')}
                     </tbody>
                 </table>
             </div>
@@ -336,8 +325,10 @@ app.get('/logs', async (req, res) => {
 
             function filterType(type) {
                 currentType = type;
-                document.querySelectorAll('.type-btn').forEach(b => b.classList.replace('bg-[#FFAA00]', 'bg-slate-800'));
-                document.querySelectorAll('.type-btn').forEach(b => b.classList.replace('text-black', 'text-slate-400'));
+                document.querySelectorAll('.type-btn').forEach(b => {
+                    b.classList.replace('bg-[#FFAA00]', 'bg-slate-800');
+                    b.classList.replace('text-black', 'text-slate-400');
+                });
                 event.target.classList.replace('bg-slate-800', 'bg-[#FFAA00]');
                 event.target.classList.replace('text-slate-400', 'text-black');
                 applyFilters();
@@ -345,8 +336,10 @@ app.get('/logs', async (req, res) => {
 
             function filterServer(srv) {
                 currentServer = srv;
-                document.querySelectorAll('.srv-btn').forEach(b => b.classList.replace('bg-[#FFAA00]', 'bg-slate-800'));
-                document.querySelectorAll('.srv-btn').forEach(b => b.classList.replace('text-black', 'text-slate-400'));
+                document.querySelectorAll('.srv-btn').forEach(b => {
+                    b.classList.replace('bg-[#FFAA00]', 'bg-slate-800');
+                    b.classList.replace('text-black', 'text-slate-400');
+                });
                 event.target.classList.replace('bg-slate-800', 'bg-[#FFAA00]');
                 event.target.classList.replace('text-slate-400', 'text-black');
                 applyFilters();
