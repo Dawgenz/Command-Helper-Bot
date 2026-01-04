@@ -11,14 +11,12 @@ const db = new Database('database.db');
 const app = express();
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers
     ]
 });
-
-// --- DB INIT ---
 db.prepare(`CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id TEXT PRIMARY KEY, 
     guild_name TEXT,
