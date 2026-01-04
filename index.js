@@ -91,7 +91,41 @@ const getHead = (title) => `
 // MAIN DASHBOARD
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
-        return res.send(`<html>${getHead('Impulse | Login')}<body class="bg-[#0b0f1a] text-white flex items-center justify-center h-screen"><div class="text-center p-10 bg-slate-900 rounded-2xl border border-amber glow-amber"><h1 class="text-4xl font-bold mb-6 text-[#FFAA00]">Impulse Bot</h1><a href="/auth/discord" class="bg-[#FFAA00] hover:scale-105 transition-transform text-black px-8 py-3 rounded-lg font-bold text-lg inline-block">Login with Discord</a></div></body></html>`);
+        return res.send(`
+        <html>
+        ${getHead('Impulse | Terminal Access')}
+        <body class="bg-[#0b0f1a] text-white flex items-center justify-center h-screen p-6">
+            <div class="max-w-md w-full">
+                <div class="text-center mb-8">
+                    <div class="inline-block p-4 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_20px_rgba(255,170,0,0.3)] mb-4 animate-pulse">
+                        <img src="${client.user.displayAvatarURL()}" class="w-16 h-16 rounded-full">
+                    </div>
+                    <h1 class="text-4xl font-black tracking-tighter text-white">IMPULSE <span class="text-[#FFAA00]">OS</span></h1>
+                    <p class="text-slate-500 text-xs mt-2 uppercase tracking-[0.2em]">Automated Thread Management System</p>
+                </div>
+                
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative overflow-hidden">
+                    <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#FFAA00] to-transparent opacity-20"></div>
+                    
+                    <div class="space-y-4 mb-8">
+                        <div class="flex items-start gap-3">
+                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00]"></div>
+                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">STATUS:</span> System online. Monitoring 24/7 forum threads and community health.</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00]"></div>
+                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Dashboard requires Discord Administrator or Command Helper authentication.</p>
+                        </div>
+                    </div>
+
+                    <a href="/auth/discord" class="w-full text-center bg-[#FFAA00] hover:bg-[#ffbb33] text-black py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)] block">
+                        Establish Connection
+                    </a>
+                    
+                    <p class="text-[10px] text-center text-slate-600 mt-6 uppercase tracking-widest italic">Authorized access only</p>
+                </div>
+            </div>
+        </body></html>`);
     }
 
     const botAvatar = client.user.displayAvatarURL();
@@ -188,11 +222,15 @@ app.get('/', async (req, res) => {
     </body></html>`);
 });
 
-// FULL LOGS PAGE WITH SEARCH & FILTER
+// FULL LOGS PAGE WITH SEARCH, FILTER, AND SERVER SORT
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    
     const allLogs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 100`).all();
     
+    // Get unique server names for filter chips
+    const uniqueServers = [...new Set(allLogs.map(l => l.guild_name).filter(Boolean))];
+
     res.send(`
     <html>
     ${getHead('Impulse | Audit Logs')}
@@ -201,25 +239,38 @@ app.get('/logs', async (req, res) => {
             <div class="flex justify-between items-end mb-8">
                 <div>
                     <a href="/" class="text-[#FFAA00] text-[10px] font-black tracking-[0.2em] hover:underline">← BACK TO TERMINAL</a>
-                    <h1 class="text-4xl font-black text-white mt-2">Audit Logs</h1>
+                    <h1 class="text-4xl font-black text-white mt-2 leading-none uppercase italic">Data Logs</h1>
                 </div>
-                <div class="flex gap-2 mb-1">
-                    <input type="text" id="logSearch" placeholder="Search logs..." class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition">
+                <input type="text" id="logSearch" placeholder="Filter details..." class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition w-48 lg:w-64">
+            </div>
+
+            <div class="space-y-4 mb-8">
+                <div>
+                    <p class="text-[9px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Action Type</p>
+                    <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                        <button onclick="filterType('ALL')" class="type-btn bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[10px] font-black uppercase">ALL</button>
+                        <button onclick="filterType('SETUP')" class="type-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">SETUP</button>
+                        <button onclick="filterType('LOCK')" class="type-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">LOCK</button>
+                        <button onclick="filterType('DUPLICATE')" class="type-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">DUPLICATE</button>
+                    </div>
+                </div>
+
+                <div>
+                    <p class="text-[9px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Server Origin</p>
+                    <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                        <button onclick="filterServer('ALL')" class="srv-btn bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[10px] font-black uppercase">ALL SOURCES</button>
+                        ${uniqueServers.map(srv => `
+                            <button onclick="filterServer('${srv}')" class="srv-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[10px] font-black uppercase hover:text-white">${srv}</button>
+                        `).join('')}
+                    </div>
                 </div>
             </div>
 
-            <div class="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
-                <button onclick="filterLogs('ALL')" class="filter-btn active bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-xs font-bold">ALL</button>
-                <button onclick="filterLogs('SETUP')" class="filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition">SETUP</button>
-                <button onclick="filterLogs('LOCK')" class="filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition">LOCK</button>
-                <button onclick="filterLogs('GREET')" class="filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition">GREET</button>
-            </div>
-
-            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-sm">
                 <table class="w-full text-left border-collapse">
                     <thead class="bg-black/40 text-[10px] uppercase font-black tracking-widest text-slate-500">
                         <tr>
-                            <th class="p-4 border-b border-slate-800">Server</th>
+                            <th class="p-4 border-b border-slate-800">Origin</th>
                             <th class="p-4 border-b border-slate-800">Action</th>
                             <th class="p-4 border-b border-slate-800">Details</th>
                             <th class="p-4 border-b border-slate-800">Timestamp</th>
@@ -227,11 +278,11 @@ app.get('/logs', async (req, res) => {
                     </thead>
                     <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-xs">
                         ${allLogs.map(l => `
-                            <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}">
+                            <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name}">
                                 <td class="p-4 text-slate-300 font-sans font-bold">${l.guild_name || 'N/A'}</td>
                                 <td class="p-4"><span class="bg-[#FFAA00]/10 text-[#FFAA00] px-2 py-0.5 rounded border border-[#FFAA00]/20 font-black">${l.action}</span></td>
-                                <td class="p-4 text-slate-400">${l.details}</td>
-                                <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleString()}</td>
+                                <td class="p-4 text-slate-400 font-sans">${l.details}</td>
+                                <td class="p-4 text-[10px] text-slate-600">${new Date(l.timestamp).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'})}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -239,46 +290,43 @@ app.get('/logs', async (req, res) => {
             </div>
         </div>
         <script>
+            let currentType = 'ALL';
+            let currentServer = 'ALL';
             const search = document.getElementById('logSearch');
             const rows = document.querySelectorAll('.log-row');
 
-            search.addEventListener('keyup', () => {
+            function applyFilters() {
                 const term = search.value.toLowerCase();
                 rows.forEach(row => {
-                    const text = row.innerText.toLowerCase();
-                    row.style.display = text.includes(term) ? '' : 'none';
+                    const typeMatch = currentType === 'ALL' || row.getAttribute('data-action') === currentType;
+                    const serverMatch = currentServer === 'ALL' || row.getAttribute('data-server') === currentServer;
+                    const textMatch = row.innerText.toLowerCase().includes(term);
+                    
+                    row.style.display = (typeMatch && serverMatch && textMatch) ? '' : 'none';
                 });
-            });
+            }
 
-            function filterLogs(action) {
-                document.querySelectorAll('.filter-btn').forEach(btn => {
-                    btn.classList = "filter-btn bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-xs font-bold hover:text-white transition";
-                });
-                event.target.classList = "filter-btn bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-xs font-bold";
-                
-                rows.forEach(row => {
-                    if(action === 'ALL' || row.getAttribute('data-action') === action) {
-                        row.style.display = '';
-                    } else {
-                        row.style.display = 'none';
-                    }
-                });
+            search.addEventListener('keyup', applyFilters);
+
+            function filterType(type) {
+                currentType = type;
+                document.querySelectorAll('.type-btn').forEach(b => b.classList.replace('bg-[#FFAA00]', 'bg-slate-800'));
+                document.querySelectorAll('.type-btn').forEach(b => b.classList.replace('text-black', 'text-slate-400'));
+                event.target.classList.replace('bg-slate-800', 'bg-[#FFAA00]');
+                event.target.classList.replace('text-slate-400', 'text-black');
+                applyFilters();
+            }
+
+            function filterServer(srv) {
+                currentServer = srv;
+                document.querySelectorAll('.srv-btn').forEach(b => b.classList.replace('bg-[#FFAA00]', 'bg-slate-800'));
+                document.querySelectorAll('.srv-btn').forEach(b => b.classList.replace('text-black', 'text-slate-400'));
+                event.target.classList.replace('bg-slate-800', 'bg-[#FFAA00]');
+                event.target.classList.replace('text-slate-400', 'text-black');
+                applyFilters();
             }
         </script>
     </body></html>`);
-});
-
-// FULL LOGS PAGE
-app.get('/logs', async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    const allLogs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 100`).all();
-    res.send(`<html><head><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-900 text-slate-200 p-8"><div class="max-w-4xl mx-auto text-white">
-        <a href="/" class="text-sky-400 hover:underline text-sm font-bold tracking-tight">← BACK TO DASHBOARD</a>
-        <h1 class="text-3xl font-bold mt-4 mb-8">Full Audit Logs</h1>
-        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden text-sm"><table class="w-full text-left">
-            <thead class="bg-slate-700 text-slate-400 text-xs uppercase"><tr class="font-bold tracking-widest"><th class="p-4">Server</th><th class="p-4">Action</th><th class="p-4">Details</th><th class="p-4">Time</th></tr></thead>
-            <tbody class="divide-y divide-slate-700">${allLogs.map(l => `<tr class="hover:bg-slate-750 transition"><td class="p-4">${l.guild_name || 'N/A'}</td><td class="p-4 font-mono text-sky-400">${l.action}</td><td class="p-4 text-slate-400">${l.details}</td><td class="p-4 text-xs text-slate-500">${new Date(l.timestamp).toLocaleString()}</td></tr>`).join('')}</tbody>
-        </table></div></div></body></html>`);
 });
 
 app.listen(3000, '0.0.0.0');
