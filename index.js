@@ -65,14 +65,47 @@ try {
 
 // --- HELPERS ---
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
-const getNav = (active) => `
-<nav class="flex gap-4 text-[10px] font-black uppercase tracking-widest mb-8">
-    <a href="/" class="${active === 'home' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Overview</a>
-    <a href="/threads" class="${active === 'threads' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Threads</a>
-    <a href="/snippets" class="${active === 'snippets' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Snippets</a>
-    <a href="/logs" class="${active === 'logs' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Logs</a>
-</nav>
-`;
+
+function getNav(activePage, user) {
+    const pages = ['overview', 'snippets', 'threads', 'logs'];
+    
+    // Logic for user profile section
+    const profileSection = user ? `
+        <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800">
+            <div class="text-right hidden sm:block">
+                <p class="text-[10px] font-black text-white uppercase leading-none">${user.username}</p>
+                <a href="/logout" class="text-[8px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Terminate Session</a>
+            </div>
+            <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" class="w-8 h-8 rounded-full border-2 border-[#FFAA00]">
+        </div>
+    ` : '';
+
+    return `
+    <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
+        <div class="flex items-center gap-4">
+            <div class="w-10 h-10 bg-[#FFAA00] rounded-xl flex items-center justify-center shadow-lg shadow-amber-500/20">
+                <span class="text-black font-black text-xl">I</span>
+            </div>
+            <div>
+                <h1 class="text-lg font-black text-white uppercase tracking-tighter leading-none">Impulse</h1>
+                <p class="text-[8px] font-bold text-[#FFAA00] uppercase tracking-[0.3em]">Bot Dashboard</p>
+            </div>
+        </div>
+
+        <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-md">
+            ${pages.map(p => `
+                <a href="/${p === 'overview' ? '' : p}" 
+                   class="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activePage === p ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'text-slate-500 hover:text-white'}">
+                    ${p}
+                </a>
+            `).join('')}
+        </div>
+
+        ${profileSection}
+    </nav>
+    `;
+}
+
 const logAction = (guildId, action, details, userId = null, userName = null, userAvatar = null, command = null) => {
     db.prepare('INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
         guildId, 
@@ -207,26 +240,16 @@ async function canManageSnippet(req, guild_id) {
 
 const getActionColor = (action) => {
     const colors = {
-        'SNIPPET': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'SNIPPET_CREATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'SNIPPET_UPDATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'SNIPPET_DELETE': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
-        
-        'SETUP': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
-        'DUPLICATE': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
-        'RESOLVED': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
-        'LOCK': 'bg-rose-500/10 text-rose-500 border-rose-500/20',
-        'GREET': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+        'LOCK': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
         'CANCEL': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-        'ANSWERED': 'bg-green-500/10 text-green-500 border-green-500/20',
-        'AUTO_CLOSE': 'bg-gray-500/10 text-gray-500 border-gray-500/20'
+        'GREET': 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+        'DUPLICATE': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+        'SETUP': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+        'RESOLVED': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
     };
-    
-    if (!colors[action]) {
-        if (action.includes('SNIPPET')) return colors['SNIPPET'];
-        if (action.includes('DELETE')) return colors['SNIPPET_DELETE'];
-    }
-
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
 
@@ -344,7 +367,7 @@ app.get('/', async (req, res) => {
                 </div>
             </header>
 
-            ${getNav('home')}
+            ${getNav('home', req.user)}
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                 ${authorizedGuilds.map(s => `
@@ -501,7 +524,7 @@ app.get('/logs', async (req, res) => {
     ${getHead('Impulse | Audit Logs')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-8">
         <div class="max-w-6xl mx-auto">
-            ${getNav('logs')}
+            ${getNav('logs', req.user)}
 
             <div class="space-y-4 mb-8">
                 <div>
@@ -544,17 +567,27 @@ app.get('/logs', async (req, res) => {
                     </thead>
                     <tbody class="divide-y divide-slate-800/40">
                         ${logs.map(l => `
-                            <tr class="hover:bg-white/5 transition-colors">
+                            <tr class="hover:bg-white/5 transition-colors cursor-pointer">
                                 <td class="p-4 text-[10px] text-slate-500 whitespace-nowrap">${l.timestamp}</td>
                                 <td class="p-4"><span class="text-[10px] font-black text-[#FFAA00] uppercase bg-[#FFAA00]/5 px-2 py-1 rounded border border-[#FFAA00]/10">${l.displayName}</span></td>
                                 <td class="p-4"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${l.actionStyle}">${l.action}</span></td>
                                 <td class="p-4">
                                     <div class="flex items-center gap-2">
-                                        <img src="${l.user_avatar}" class="w-5 h-5 rounded-full border border-slate-700">
-                                        <span class="text-xs font-bold text-slate-300">${l.user_name}</span>
+                                        <img src="${l.user_avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" class="w-5 h-5 rounded-full border border-slate-700">
+                                        <span class="text-xs font-bold text-slate-300">${l.user_name || 'SYSTEM'}</span>
                                     </div>
                                 </td>
-                                <td class="p-4 text-xs text-slate-400">${l.details}</td>
+                                <td class="p-4 text-xs text-slate-400">
+                                    <details class="group">
+                                        <summary class="list-none flex items-center justify-between hover:text-white transition-all">
+                                            <span>${l.details}</span>
+                                            <svg class="w-3 h-3 text-slate-600 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                        </summary>
+                                        <div class="mt-3 p-3 bg-black/40 rounded-lg border border-slate-800 font-mono text-[10px] text-blue-400 overflow-x-auto">
+                                            <span class="text-slate-600 mr-2">>_</span>${l.command_used || 'N/A (Automated Event)'}
+                                        </div>
+                                    </details>
+                                </td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -674,7 +707,7 @@ app.get('/snippets', async (req, res) => {
 
     // Handle case where user has no access to any servers
     if (allowedGuildIds.length === 0) {
-        return res.send(`<html>${getHead('Snippets')} <body class="bg-[#0b0f1a] text-white p-8">${getNav('snippets')} <p>No snippets found or no server access.</p></body></html>`);
+        return res.send(`<html>${getHead('Snippets')} <body class="bg-[#0b0f1a] text-white p-8">${getNav('snippets', req.user)} <p>No snippets found or no server access.</p></body></html>`);
     }
 
     // 2. Fetch snippets for those guilds
@@ -689,7 +722,7 @@ app.get('/snippets', async (req, res) => {
     ${getHead('Impulse | Snippets')}
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-5xl mx-auto">
-            ${getNav('snippets')}
+            ${getNav('snippets', req.user)}
 
             <div class="flex justify-between items-center mb-6">
                 <h1 class="text-2xl font-black text-white uppercase">Snippets</h1>
@@ -748,7 +781,7 @@ app.get('/snippets/new', (req, res) => {
     </style>
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-7xl mx-auto">
-            ${getNav('snippets')}
+            ${getNav('snippets', req.user)}
             
             <div class="mb-8 flex justify-between items-end">
                 <div>
@@ -1002,7 +1035,7 @@ app.get('/snippets/edit/:id', async (req, res) => {
     ${getHead('Impulse | Edit Snippet')}
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-6xl mx-auto">
-            ${getNav('snippets')}
+            ${getNav('snippets', req.user)}
             
             <div class="mb-8">
                 <h1 class="text-3xl font-black text-white uppercase tracking-tighter text-[#FFAA00]">Edit Snippet</h1>
