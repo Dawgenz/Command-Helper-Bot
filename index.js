@@ -756,13 +756,17 @@ app.get('/snippets/new', (req, res) => {
     res.send(`
     <html>
     ${getHead('Impulse | Create Snippet')}
+    <style>
+        /* Ensures the preview elements don't take up space when empty */
+        #preTitle:empty, #preDesc:empty, #preFooter:empty { display: none; }
+    </style>
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-6xl mx-auto">
             ${getNav('snippets')}
             
             <div class="mb-8">
                 <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Create <span class="text-[#FFAA00]">Snippet</span></h1>
-                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest mt-1">Live Preview Mode</p>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest mt-1">Live Embed Preview</p>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
@@ -776,46 +780,68 @@ app.get('/snippets/new', (req, res) => {
                             </select>
                         </div>
                         <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Trigger Name</label>
-                            <input name="name" required placeholder="rules" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none">
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Trigger Name (Command)</label>
+                            <input name="name" required placeholder="e.g. rules" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none">
                         </div>
                     </div>
 
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <input id="inTitle" name="title" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        <textarea id="inDesc" name="description" placeholder="Embed Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32 focus:border-[#FFAA00] outline-none resize-none"></textarea>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <input id="inFooter" name="footer" placeholder="Footer text" class="md:col-span-2 w-full bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Color</label>
-                            <input id="inColor" name="color" type="color" value="#FFAA00" class="bg-transparent border-none w-8 h-8 cursor-pointer">
+                        <div>
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block text-slate-400">Embed Title</label>
+                            <input id="inTitle" name="title" placeholder="Enter title..." class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block text-slate-400">Embed Description</label>
+                            <textarea id="inDesc" name="description" placeholder="Enter main message..." class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32 focus:border-[#FFAA00] outline-none resize-none"></textarea>
                         </div>
                     </div>
 
-                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs tracking-widest hover:bg-[#FFC040] transition-all">Save Snippet</button>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="md:col-span-2">
+                             <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Footer Text</label>
+                             <input id="inFooter" name="footer" placeholder="Embed footer..." class="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        </div>
+                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800 flex flex-col justify-center">
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Sidebar Color</label>
+                            <div class="flex items-center justify-between bg-slate-950 p-2 rounded-lg border border-slate-800">
+                                <span class="text-[10px] text-slate-500 font-mono" id="hexVal">#FFAA00</span>
+                                <input id="inColor" name="color" type="color" value="#FFAA00" class="bg-transparent border-none w-8 h-8 cursor-pointer">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-[10px] tracking-[0.2em] hover:bg-[#FFC040] transition-all shadow-[0_10px_20px_rgba(255,170,0,0.1)]">
+                        Initialize Snippet
+                    </button>
                 </form>
 
                 <div class="sticky top-6">
-                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4 block text-center">Discord Preview</label>
-                    <div class="bg-[#313338] p-4 rounded-sm shadow-xl font-['gg_sans',_sans-serif]">
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4 block text-center">Live Discord Preview</label>
+                    <div class="bg-[#313338] p-4 rounded-sm shadow-2xl font-['gg_sans',_sans-serif] pointer-events-none select-none">
                         <div class="flex items-start gap-4">
                             <img src="${client.user.displayAvatarURL()}" class="w-10 h-10 rounded-full">
                             <div class="flex-1">
                                 <div class="flex items-center gap-2 mb-1">
-                                    <span class="font-medium text-white text-sm hover:underline cursor-pointer">${client.user.username}</span>
-                                    <span class="bg-[#5865F2] text-white text-[10px] px-1 rounded-sm font-bold">BOT</span>
+                                    <span class="font-medium text-white text-sm">${client.user.username}</span>
+                                    <span class="bg-[#5865F2] text-white text-[10px] px-1.5 py-0.5 rounded-[3px] font-bold flex items-center gap-0.5">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                        APP
+                                    </span>
                                     <span class="text-[#949ba4] text-[10px]">Today at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                 </div>
                                 
-                                <div id="preBorder" class="bg-[#2b2d31] border-l-4 border-[#FFAA00] rounded-sm p-3 mt-1 max-w-[432px]">
-                                    <div id="preTitle" class="text-white font-bold text-sm mb-1 empty:hidden"></div>
-                                    <div id="preDesc" class="text-[#dbdee1] text-xs leading-5 whitespace-pre-wrap empty:hidden"></div>
-                                    <div id="preFooter" class="text-[#b5bac1] text-[10px] mt-2 font-medium empty:hidden"></div>
+                                <div id="preBorder" class="bg-[#2b2d31] border-l-[4px] border-[#FFAA00] rounded-[4px] p-3 mt-1 max-w-[432px]">
+                                    <div id="preTitle" class="text-white font-bold text-base mb-2"></div>
+                                    <div id="preDesc" class="text-[#dbdee1] text-sm leading-[1.375rem] whitespace-pre-wrap"></div>
+                                    <div id="preFooter" class="text-[#b5bac1] text-[10px] mt-2 font-medium"></div>
                                 </div>
                             </div>
                         </div>
+                    </div>
+                    <div class="mt-6 p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+                         <p class="text-[10px] text-amber-500/80 leading-relaxed">
+                            <strong class="uppercase tracking-tighter">Note:</strong> This is a simulation. The actual embed in Discord may vary slightly based on screen size and theme settings.
+                         </p>
                     </div>
                 </div>
             </div>
@@ -833,7 +859,8 @@ app.get('/snippets/new', (req, res) => {
                 title: document.getElementById('preTitle'),
                 desc: document.getElementById('preDesc'),
                 footer: document.getElementById('preFooter'),
-                border: document.getElementById('preBorder')
+                border: document.getElementById('preBorder'),
+                hex: document.getElementById('hexVal')
             };
 
             function updatePreview() {
@@ -841,6 +868,7 @@ app.get('/snippets/new', (req, res) => {
                 preview.desc.innerText = inputs.desc.value;
                 preview.footer.innerText = inputs.footer.value;
                 preview.border.style.borderColor = inputs.color.value;
+                preview.hex.innerText = inputs.color.value.toUpperCase();
             }
 
             // Listen for any typing or color picking
