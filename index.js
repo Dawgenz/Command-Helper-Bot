@@ -106,6 +106,39 @@ function parseVars(text, interaction = null) {
     return processed.replace(/{br}/g, '\n');
 }
 
+function getErrorPage(title, message, code = "403") {
+    return `
+    <html>
+    ${getHead('Impulse | ' + title)}
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6">
+        <div class="max-w-md w-full text-center space-y-6">
+            <div class="relative">
+                <h1 class="text-9xl font-black text-white/5 tracking-tighter select-none">${code}</h1>
+                <div class="absolute inset-0 flex items-center justify-center">
+                    <div class="w-16 h-16 bg-[#FFAA00]/20 rounded-full flex items-center justify-center border border-[#FFAA00]/50 animate-pulse">
+                        <svg class="w-8 h-8 text-[#FFAA00]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="space-y-2">
+                <h2 class="text-2xl font-black text-white uppercase tracking-tight">${title}</h2>
+                <p class="text-slate-500 text-sm font-medium leading-relaxed">${message}</p>
+            </div>
+
+            <div class="pt-4">
+                <a href="/" class="inline-block bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-xl border border-slate-800 text-xs font-black uppercase tracking-widest transition-all">
+                    Return to Dashboard
+                </a>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+}
+
 // --- PASSPORT / OAUTH2 CONFIG ---
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
@@ -989,7 +1022,7 @@ app.post('/snippets/new', express.urlencoded({ extended: true }), async (req, re
                            hasHelperRole(member, getSettings(guild_id));
 
         if (!isAuthorized) {
-            return res.status(403).send("Security Alert: Unauthorized snippet creation attempt.");
+            return res.status(403).send(getErrorPage("Access Denied", "Clearance Level: Administrator or Command Helper required for snippet creation."));
         }
 
         // --- DUPLICATE CHECK ---
@@ -1043,8 +1076,8 @@ app.get('/snippets/edit/:id', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
-    if (!snippet) return res.redirect('/snippets');
-    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("Forbidden");
+    if (!snippet) return res.status(404).send(getErrorPage("Data Missing", "The requested snippet ID could not be located in the database.", "404"));
+    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send(getErrorPage("Access Denied", "You don't have the required permissions to manage snippets in this server."));
 
     res.send(`
     <html>
@@ -1154,7 +1187,7 @@ app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), async (re
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
     if (!snippet) return res.redirect('/snippets');
     
-    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("Forbidden");
+    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send(getErrorPage("Access Denied", "System security prevents unauthorized modification of this snippet."));
 
     const { name, title, description, footer, color, url, image_url, thumbnail_url } = req.body;
 
@@ -1198,7 +1231,7 @@ app.get('/snippets/delete/:id', (req, res) => {
     if (!snippet) return res.redirect('/snippets');
 
     if (!canManageSnippet(req, snippet)) { 
-        return res.status(403).send("Forbidden");
+        return res.status(403).send(getErrorPage("Access Denied", "Deletion sequence aborted. Required permissions not detected."));
     }
 
     db.prepare(`DELETE FROM snippets WHERE id = ?`).run(req.params.id);
@@ -1226,7 +1259,9 @@ app.get('/snippets/toggle/:id', (req, res) => {
     res.redirect('/snippets');
 });
 
-
+app.use((req, res) => {
+    res.status(404).send(getErrorPage("Page Not Found", "The system module you requested does not exist or has been moved.", "404"));
+});
 
 app.listen(3000, '0.0.0.0');
 
@@ -1567,7 +1602,7 @@ client.on('interactionCreate', async (interaction) => {
         const snippet = db.prepare(`SELECT * FROM snippets WHERE guild_id = ? AND name = ? AND enabled = 1`).get(interaction.guildId, name.toLowerCase());
 
         if (!snippet) {
-            return interaction.reply({ content: "❌ Snippet not found or disabled.", ephemeral: true });
+            return res.status(404).send(getErrorPage("Not Found", "We couldn't find the snippet you're looking for. It may have been deleted."));
         }
 
         try {
@@ -1603,6 +1638,10 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
+});
+
+app.use((req, res) => {
+    res.status(404).send(getErrorPage("Module Offline", "The system route you are attempting to access does not exist.", "404"));
 });
 
 client.login(process.env.DISCORD_TOKEN);
