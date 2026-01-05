@@ -1148,23 +1148,47 @@ app.get('/snippets/edit/:id', async (req, res) => {
     `);
 });
 
-app.post('/snippets/edit/:id', async (req, res) => {
+app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
-    if (!snippet || !(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("Forbidden");
-
-    const { name, title, description, footer, url, image_url, thumbnail_url } = req.body;
-
-    db.prepare(`
-        UPDATE snippets 
-        SET name = ?, title = ?, description = ?, footer = ?, url = ?, image_url = ?, thumbnail_url = ?
-        WHERE id = ?
-    `).run(name.toLowerCase(), title, description, footer, url, image_url, thumbnail_url, req.params.id);
-
-    logAction(snippet.guild_id, 'SNIPPET_UPDATE', `Updated snippet: ${name}`, req.user.id, req.user.username, `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`);
+    if (!snippet) return res.redirect('/snippets');
     
-    res.redirect('/snippets');
+    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("Forbidden");
+
+    const { name, title, description, footer, color, url, image_url, thumbnail_url } = req.body;
+
+    try {
+        db.prepare(`
+            UPDATE snippets 
+            SET name = ?, title = ?, description = ?, footer = ?, color = ?, url = ?, image_url = ?, thumbnail_url = ?
+            WHERE id = ?
+        `).run(
+            name.toLowerCase(), 
+            title, 
+            description, 
+            footer, 
+            color || "#FFAA00", 
+            url, 
+            image_url, 
+            thumbnail_url, 
+            req.params.id
+        );
+
+        logAction(
+            snippet.guild_id, 
+            'SNIPPET_UPDATE', 
+            `Updated snippet: ${name}`, 
+            req.user.id, 
+            req.user.username, 
+            `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`
+        );
+        
+        res.redirect('/snippets');
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Failed to update database.");
+    }
 });
 
 app.get('/snippets/delete/:id', (req, res) => {
