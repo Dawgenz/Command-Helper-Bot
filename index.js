@@ -126,7 +126,7 @@ app.get('/', async (req, res) => {
                         </div>
                         <div class="flex items-start gap-3">
                             <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00] shrink-0"></div>
-                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Mission Control requires Admin or Helper clearance.</p>
+                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Impluse Bot Dashboard requires Admin or Command Helper clearance.</p>
                         </div>
                     </div>
 
@@ -166,7 +166,7 @@ app.get('/', async (req, res) => {
 
     res.send(`
     <html>
-    ${getHead('Impulse | Mission Control')}
+    ${getHead('Impulse | Bot Dashboard')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-4 md:p-8">
         <div class="max-w-6xl mx-auto">
             <header class="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
@@ -174,7 +174,7 @@ app.get('/', async (req, res) => {
                     <img src="${botAvatar}" class="w-12 h-12 md:w-14 md:h-14 rounded-full border-2 border-[#FFAA00] shadow-[0_0_15px_rgba(255,170,0,0.4)]">
                     <div>
                         <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tighter leading-none">IMPULSE</h1>
-                        <span class="text-[#FFAA00] text-[10px] md:text-xs font-mono tracking-[0.3em] uppercase">Mission Control</span>
+                        <span class="text-[#FFAA00] text-[10px] md:text-xs font-mono tracking-[0.3em] uppercase">Bot Dashboard</span>
                     </div>
                 </div>
                 <div class="flex items-center gap-3 bg-slate-900/80 p-2 pr-5 rounded-full border border-slate-800">
@@ -183,6 +183,7 @@ app.get('/', async (req, res) => {
                         <span class="text-xs md:text-sm font-bold text-white leading-none">${req.user.username}</span>
                         <a href="/logout" class="text-[9px] text-rose-500 hover:underline uppercase font-bold tracking-widest mt-1">Disconnect</a>
                     </div>
+                    <a href="/invite" class="text-[#FFAA00] text-[9px] font-black tracking-[0.2em] hover:underline uppercase">+ Add Bot</a>
                 </div>
             </header>
 
@@ -260,7 +261,7 @@ app.get('/', async (req, res) => {
                     </div>
 
                     <div class="flex items-center justify-center gap-6 text-[9px] text-slate-600 uppercase tracking-wider font-bold">
-                        <span>Built for Command Block Community</span>
+                        <span>Built for Gups Command Central</span>
                         <span class="text-slate-800">•</span>
                         <span>Powered by Discord.js</span>
                     </div>
