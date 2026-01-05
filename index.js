@@ -26,11 +26,31 @@ db.prepare(`CREATE TABLE IF NOT EXISTS guild_settings (
     helper_role_id TEXT
 )`).run();
 db.prepare('CREATE TABLE IF NOT EXISTS pending_locks (thread_id TEXT PRIMARY KEY, guild_id TEXT, lock_at INTEGER)').run();
-db.prepare('CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT, action TEXT, details TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)').run();
+db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    guild_id TEXT, 
+    action TEXT, 
+    details TEXT, 
+    user_id TEXT,
+    user_name TEXT,
+    user_avatar TEXT,
+    command_used TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)`).run();
 
 // --- HELPERS ---
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
-const logAction = (guildId, action, details) => db.prepare('INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)').run(guildId, action, details);
+const logAction = (guildId, action, details, userId = null, userName = null, userAvatar = null, command = null) => {
+    db.prepare('INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        guildId, 
+        action, 
+        details, 
+        userId, 
+        userName, 
+        userAvatar, 
+        command
+    );
+};
 
 function hasHelperRole(member, settings) {
     if (!settings.helper_role_id) return false;
@@ -126,13 +146,22 @@ app.get('/', async (req, res) => {
                         </div>
                         <div class="flex items-start gap-3">
                             <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00] shrink-0"></div>
-                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Impluse Bot Dashboard requires Admin or Command Helper clearance.</p>
+                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Impulse Bot Dashboard requires Admin or Command Helper clearance.</p>
                         </div>
                     </div>
 
-                    <a href="/auth/discord" class="w-full text-center bg-[#FFAA00] hover:bg-[#ffbb33] text-black py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)] block">
-                        Establish Connection
-                    </a>
+                    <div class="space-y-3">
+                        <a href="/auth/discord" class="w-full text-center bg-[#FFAA00] hover:bg-[#ffbb33] text-black py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)] block">
+                            Establish Connection
+                        </a>
+                        
+                        <a href="/invite" class="w-full text-center bg-slate-800 hover:bg-slate-700 text-[#FFAA00] py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all border-2 border-[#FFAA00]/30 hover:border-[#FFAA00] block flex items-center justify-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                            </svg>
+                            Add Bot to Server
+                        </a>
+                    </div>
                     
                     <p class="text-[9px] text-center text-slate-600 mt-6 uppercase tracking-widest italic font-bold">Authorized personnel only</p>
                 </div>
@@ -177,13 +206,19 @@ app.get('/', async (req, res) => {
                         <span class="text-[#FFAA00] text-[10px] md:text-xs font-mono tracking-[0.3em] uppercase">Bot Dashboard</span>
                     </div>
                 </div>
-                <div class="flex items-center gap-3 bg-slate-900/80 p-2 pr-5 rounded-full border border-slate-800">
-                    <img src="${userAvatar}" class="w-8 h-8 md:w-10 md:h-10 rounded-full border border-[#FFAA00]/50">
-                    <div class="flex flex-col">
-                        <span class="text-xs md:text-sm font-bold text-white leading-none">${req.user.username}</span>
-                        <a href="/logout" class="text-[9px] text-rose-500 hover:underline uppercase font-bold tracking-widest mt-1">Disconnect</a>
+                <div class="flex items-center gap-3">
+                    <a href="/invite" class="w-10 h-10 md:w-11 md:h-11 rounded-full bg-slate-900/80 border-2 border-[#FFAA00]/30 hover:border-[#FFAA00] hover:bg-slate-800 transition flex items-center justify-center group" title="Add Bot">
+                        <svg class="w-5 h-5 text-[#FFAA00] group-hover:scale-110 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                    </a>
+                    <div class="flex items-center gap-3 bg-slate-900/80 p-2 pr-5 rounded-full border border-slate-800">
+                        <img src="${userAvatar}" class="w-8 h-8 md:w-10 md:h-10 rounded-full border border-[#FFAA00]/50">
+                        <div class="flex flex-col">
+                            <span class="text-xs md:text-sm font-bold text-white leading-none">${req.user.username}</span>
+                            <a href="/logout" class="text-[9px] text-rose-500 hover:underline uppercase font-bold tracking-widest mt-1">Disconnect</a>
+                        </div>
                     </div>
-                    <a href="/invite" class="text-[#FFAA00] text-[9px] font-black tracking-[0.2em] hover:underline uppercase">+ Add Bot</a>
                 </div>
             </header>
 
@@ -349,10 +384,11 @@ app.get('/logs', async (req, res) => {
                             <th class="p-4 border-b border-slate-800 w-28 text-center">Action</th>
                             <th class="p-4 border-b border-slate-800">Details</th>
                             <th class="p-4 border-b border-slate-800 w-40">Timestamp</th>
+                            <th class="p-4 border-b border-slate-800 w-12"></th>
                         </tr>
                     </thead>
-                    <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
-                        ${allLogs.map(l => {
+                    <tbody id="logTableBody" class="mono text-[11px]">
+                        ${allLogs.map((l, idx) => {
                             const date = new Date(l.timestamp);
                             const dateStr = date.toLocaleDateString('en-US', { 
                                 weekday: 'long',
@@ -366,8 +402,11 @@ app.get('/logs', async (req, res) => {
                                 second: '2-digit',
                                 hour12: true
                             });
+                            
+                            const hasUserInfo = l.user_id && l.user_name;
+                            
                             return `
-                            <tr class="log-row hover:bg-[#FFAA00]/5 transition cursor-pointer" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
+                            <tr class="log-row border-b border-slate-800/40 hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
                                 <td class="p-4 text-slate-500 font-bold uppercase text-[10px]">${l.guild_name || 'System'}</td>
                                 <td class="p-4 text-center">
                                     <span class="${getActionColor(l.action)} px-3 py-1 rounded font-black uppercase text-[9px] inline-block min-w-[80px]">
@@ -379,7 +418,37 @@ app.get('/logs', async (req, res) => {
                                     <div class="font-bold">${dateStr}</div>
                                     <div class="text-slate-700 mt-0.5">${timeStr}</div>
                                 </td>
+                                <td class="p-4">
+                                    ${hasUserInfo ? `
+                                        <button onclick="toggleExpand(${idx})" class="expand-btn text-slate-500 hover:text-[#FFAA00] transition">
+                                            <svg class="w-5 h-5 transition-transform" id="icon-${idx}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                            </svg>
+                                        </button>
+                                    ` : ''}
+                                </td>
                             </tr>
+                            ${hasUserInfo ? `
+                            <tr class="expanded-row hidden border-b border-slate-800/40" id="expand-${idx}" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
+                                <td colspan="5" class="p-0">
+                                    <div class="bg-black/20 p-6 border-t border-slate-800/30">
+                                        <div class="flex items-start gap-4">
+                                            <img src="${l.user_avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" class="w-12 h-12 rounded-full border-2 border-[#FFAA00]/30">
+                                            <div class="flex-1">
+                                                <div class="flex items-center gap-3 mb-2">
+                                                    <span class="text-sm font-bold text-white">${l.user_name || 'Unknown User'}</span>
+                                                    <span class="text-[9px] text-slate-600 font-mono">ID: ${l.user_id || 'N/A'}</span>
+                                                </div>
+                                                <div class="bg-slate-900/40 rounded-lg p-3 border border-slate-800">
+                                                    <p class="text-[10px] uppercase text-slate-500 font-black mb-1 tracking-wider">Command Executed</p>
+                                                    <code class="text-xs text-[#FFAA00] font-mono">${l.command_used || 'N/A'}</code>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            ` : ''}
                         `}).join('')}
                     </tbody>
                 </table>
@@ -391,13 +460,42 @@ app.get('/logs', async (req, res) => {
             const search = document.getElementById('logSearch');
             const rows = document.querySelectorAll('.log-row');
 
+            function toggleExpand(idx) {
+                const expandRow = document.getElementById('expand-' + idx);
+                const icon = document.getElementById('icon-' + idx);
+                
+                if (expandRow.classList.contains('hidden')) {
+                    expandRow.classList.remove('hidden');
+                    icon.style.transform = 'rotate(180deg)';
+                } else {
+                    expandRow.classList.add('hidden');
+                    icon.style.transform = 'rotate(0deg)';
+                }
+            }
+
             function applyFilters() {
                 const term = search.value.toLowerCase();
-                rows.forEach(row => {
+                const allRows = document.querySelectorAll('.log-row, .expanded-row');
+                
+                allRows.forEach(row => {
+                    if (row.classList.contains('expanded-row')) {
+                        // Handle expanded rows separately - they follow their parent
+                        return;
+                    }
+                    
                     const typeMatch = currentType === 'ALL' || row.getAttribute('data-action') === currentType;
                     const serverMatch = currentServer === 'ALL' || row.getAttribute('data-server') === currentServer;
                     const textMatch = row.innerText.toLowerCase().includes(term);
-                    row.style.display = (typeMatch && serverMatch && textMatch) ? '' : 'none';
+                    const shouldShow = typeMatch && serverMatch && textMatch;
+                    
+                    row.style.display = shouldShow ? '' : 'none';
+                    
+                    // Also hide corresponding expanded row if main row is hidden
+                    const rowId = Array.from(document.querySelectorAll('.log-row')).indexOf(row);
+                    const expandedRow = document.getElementById('expand-' + rowId);
+                    if (expandedRow) {
+                        expandedRow.style.display = shouldShow ? '' : 'none';
+                    }
                 });
             }
 
@@ -577,6 +675,11 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     const settings = getSettings(interaction.guildId);
 
+    // Extract user info for logging
+    const userId = interaction.user.id;
+    const userName = interaction.user.username;
+    const userAvatar = interaction.user.displayAvatarURL();
+
     if (interaction.commandName === 'setup') {
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return interaction.reply({ 
@@ -600,7 +703,15 @@ client.on('interactionCreate', async (interaction) => {
             cleanRoles
         );
 
-        logAction(interaction.guildId, 'SETUP', `Setup updated with Roles: ${cleanRoles}`);
+        logAction(
+            interaction.guildId, 
+            'SETUP', 
+            `Setup updated with Roles: ${cleanRoles}`,
+            userId,
+            userName,
+            userAvatar,
+            '/setup'
+        );
         
         const setupEmbed = new EmbedBuilder()
             .setTitle("✅ Setup Complete!")
@@ -659,7 +770,15 @@ client.on('interactionCreate', async (interaction) => {
             lockTime
         );
         
-        logAction(interaction.guildId, 'RESOLVED', `Marked thread for locking in ${customMinutes}m: ${interaction.channel.name}`);
+        logAction(
+            interaction.guildId, 
+            'RESOLVED', 
+            `Marked thread for locking in ${customMinutes}m: ${interaction.channel.name}`,
+            userId,
+            userName,
+            userAvatar,
+            `/resolved minutes:${customMinutes}`
+        );
         
         const resolvedEmbed = new EmbedBuilder()
             .setTitle("✅ Thread Marked as Resolved")
@@ -667,7 +786,7 @@ client.on('interactionCreate', async (interaction) => {
                 `This thread will automatically lock in **${customMinutes} minutes**.\n\n` +
                 `If you need to reopen this thread or have additional questions, please contact a moderator before it locks.`
             )
-            .setColor(0x10B981) // Emerald green
+            .setColor(0x10B981)
             .setTimestamp(lockTime)
             .setFooter({ text: `Locks at` });
         
@@ -697,14 +816,22 @@ client.on('interactionCreate', async (interaction) => {
                     `**Original Thread:** ${link}\n\n` +
                     `Please refer to the linked thread for the solution. This thread will now be locked.`
                 )
-                .setColor(0x0EA5E9) // Sky blue
+                .setColor(0x0EA5E9)
                 .setTimestamp()
                 .setFooter({ text: "Impulse Bot • Duplicate Detection" });
             
             await interaction.reply({ embeds: [duplicateEmbed] });
             await interaction.channel.setLocked(true);
             
-            logAction(interaction.guildId, 'DUPLICATE', `Closed duplicate: ${interaction.channel.name}`);
+            logAction(
+                interaction.guildId, 
+                'DUPLICATE', 
+                `Closed duplicate: ${interaction.channel.name}`,
+                userId,
+                userName,
+                userAvatar,
+                `/duplicate link:${link}`
+            );
         } catch (e) {
             console.error(e);
             interaction.followUp({ 
