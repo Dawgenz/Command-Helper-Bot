@@ -673,10 +673,8 @@ app.get('/invite', (req, res) => {
 app.get('/snippets', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
-    const creator = await client.users.fetch(s.created_by).catch(() => null);
-    const allowedGuildIds = db.prepare(`
-        SELECT guild_id FROM guild_settings
-    `).all()
+    // 1. Get IDs of guilds where the user has permission
+    const allowedGuildIds = db.prepare(`SELECT guild_id FROM guild_settings`).all()
       .map(g => g.guild_id)
       .filter(gid => {
           const guild = client.guilds.cache.get(gid);
@@ -688,11 +686,17 @@ app.get('/snippets', async (req, res) => {
           );
       });
 
+    // Handle case where user has no access to any servers
+    if (allowedGuildIds.length === 0) {
+        return res.send(`<html>${getHead('Snippets')} <body class="bg-[#0b0f1a] text-white p-8">${getNav('snippets')} <p>No snippets found or no server access.</p></body></html>`);
+    }
+
+    // 2. Fetch snippets for those guilds
     const snippets = db.prepare(`
-    SELECT * FROM snippets
-    WHERE guild_id IN (${allowedGuildIds.map(() => '?').join(',')})
-    ORDER BY updated_at DESC
-`).all(...allowedGuildIds);
+        SELECT * FROM snippets
+        WHERE guild_id IN (${allowedGuildIds.map(() => '?').join(',')})
+        ORDER BY updated_at DESC
+    `).all(...allowedGuildIds);
 
     res.send(`
     <html>
@@ -709,23 +713,28 @@ app.get('/snippets', async (req, res) => {
             </div>
 
             <div class="space-y-3">
-                ${snippets.map(s => `
+                ${snippets.map(s => {
+                    // Look up the guild name for better UI
+                    const guild = client.guilds.cache.get(s.guild_id);
+                    return `
                     <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
                         <div>
-                            <p class="font-bold text-white">${s.name}</p>
-                            <p class="text-[10px] text-slate-500">Created by: ${creator ? creator.username : 'Unknown'}</p>
+                            <div class="flex items-center gap-2">
+                                <p class="font-bold text-white">${s.name}</p>
+                                <span class="text-[9px] bg-slate-800 px-2 py-0.5 rounded text-slate-500">${guild ? guild.name : 'Unknown Server'}</span>
+                            </div>
+                            <p class="text-[10px] text-slate-500">ID: ${s.created_by}</p>
                             <p class="text-xs text-slate-400">${s.title || 'No title'}</p>
                         </div>
                         <div class="flex items-center gap-3">
-                            <span class="text-[9px] uppercase font-black ${s.enabled ? 'text-emerald-400' : 'text-rose-500'}">
+                            <a href="/snippets/toggle/${s.id}" class="text-[9px] uppercase font-black ${s.enabled ? 'text-emerald-400' : 'text-rose-500'} hover:underline">
                                 ${s.enabled ? 'Enabled' : 'Disabled'}
-                            </span>
-
+                            </a>
                             <a href="/snippets/edit/${s.id}" class="text-xs text-sky-400 hover:underline">Edit</a>
-                            <a href="/snippets/delete/${s.id}" class="text-xs text-rose-500 hover:underline">Delete</a>
+                            <a href="/snippets/delete/${s.id}" class="text-xs text-rose-500 hover:underline" onclick="return confirm('Delete this snippet?')">Delete</a>
                         </div>
                     </div>
-                `).join('')}
+                `}).join('')}
             </div>
         </div>
     </body>
@@ -853,10 +862,13 @@ app.post('/snippets/new', express.urlencoded({ extended: true }), (req, res) => 
 
 app.get('/snippets/edit/:id', (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    if (!canManageSnippet(req, snippet)) { return res.status(403).send("Forbidden");}
 
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
     if (!snippet) return res.redirect('/snippets');
+
+    if (!canManageSnippet(req, snippet)) { 
+        return res.status(403).send("Forbidden: You do not have permission to edit this snippet.");
+    }
 
     res.send(`
         <html>
