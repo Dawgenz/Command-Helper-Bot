@@ -37,9 +37,34 @@ db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (
     command_used TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )`).run();
+db.prepare(`
+CREATE TABLE IF NOT EXISTS snippets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    color TEXT,
+    fields TEXT,
+    footer TEXT,
+    enabled INTEGER DEFAULT 1,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(guild_id, name)
+)
+`).run();
 
 // --- HELPERS ---
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
+const getNav = (active) => `
+<nav class="flex gap-4 text-[10px] font-black uppercase tracking-widest mb-8">
+    <a href="/" class="${active === 'home' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Overview</a>
+    <a href="/threads" class="${active === 'threads' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Threads</a>
+    <a href="/snippets" class="${active === 'snippets' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Snippets</a>
+    <a href="/logs" class="${active === 'logs' ? 'text-[#FFAA00]' : 'text-slate-500 hover:text-white'}">Logs</a>
+</nav>
+`;
 const logAction = (guildId, action, details, userId = null, userName = null, userAvatar = null, command = null) => {
     db.prepare('INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
         guildId, 
@@ -225,6 +250,8 @@ app.get('/', async (req, res) => {
                     </div>
                 </div>
             </header>
+
+            ${getNav('snippets')}
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                 ${authorizedGuilds.map(s => `
@@ -630,6 +657,120 @@ app.get('/invite', (req, res) => {
     </body></html>`);
 });
 
+app.get('/snippets', async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+
+    const snippets = db.prepare(`
+        SELECT * FROM snippets
+        ORDER BY updated_at DESC
+    `).all();
+
+    res.send(`
+    <html>
+    ${getHead('Impulse | Snippets')}
+    <body class="bg-[#0b0f1a] text-slate-200 p-6">
+        <div class="max-w-5xl mx-auto">
+            ${getNav('snippets')}
+
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-2xl font-black text-white uppercase">Snippets</h1>
+                <a href="/snippets/new" class="bg-[#FFAA00] text-black px-4 py-2 rounded-lg text-[10px] font-black uppercase">
+                    + Create Snippet
+                </a>
+            </div>
+
+            <div class="space-y-3">
+                ${snippets.map(s => `
+                    <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                        <div>
+                            <p class="font-bold text-white">${s.name}</p>
+                            <p class="text-xs text-slate-400">${s.title || 'No title'}</p>
+                        </div>
+                        <span class="text-[9px] uppercase font-black ${s.enabled ? 'text-emerald-400' : 'text-rose-500'}">
+                            ${s.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    </body>
+    </html>
+    `);
+});
+
+app.get('/snippets/new', (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+
+    res.send(`
+    <html>
+    ${getHead('Create Snippet')}
+    <body class="bg-[#0b0f1a] text-slate-200 p-6">
+        <div class="max-w-4xl mx-auto">
+            ${getNav('snippets')}
+
+            <h1 class="text-2xl font-black text-white mb-6 uppercase">Create Snippet</h1>
+
+            <form method="POST" action="/snippets/new" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-4">
+                    <input name="name" placeholder="snippet_name" required class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
+                    <input name="title" placeholder="Embed title" class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
+                    <textarea name="description" placeholder="Embed description" class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm h-32"></textarea>
+                    <input name="color" type="color" value="#FFAA00" class="w-24 h-10">
+                    <input name="footer" placeholder="Footer text" class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
+                    <input type="hidden" name="fields" id="fieldsInput">
+                    <button class="bg-[#FFAA00] text-black px-6 py-3 rounded-xl font-black uppercase text-xs">
+                        Save Snippet
+                    </button>
+                </div>
+
+                <div>
+                    <p class="text-xs uppercase font-black text-slate-500 mb-2">Preview</p>
+                    <div id="preview" class="bg-[#2b2d31] p-4 rounded-lg border-l-4" style="border-color:#FFAA00">
+                        <h3 id="pTitle" class="font-bold text-white"></h3>
+                        <p id="pDesc" class="text-sm text-slate-300 mt-1"></p>
+                        <div id="pFields" class="grid grid-cols-1 gap-2 mt-3"></div>
+                        <p id="pFooter" class="text-xs text-slate-400 mt-4"></p>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <script>
+            const update = () => {
+                pTitle.innerText = title.value;
+                pDesc.innerText = description.value;
+                pFooter.innerText = footer.value;
+                preview.style.borderColor = color.value;
+            };
+            document.querySelectorAll('input, textarea').forEach(el => el.addEventListener('input', update));
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+app.post('/snippets/new', express.urlencoded({ extended: true }), (req, res) => {
+    const { name, title, description, color, footer, fields } = req.body;
+
+    db.prepare(`
+        INSERT INTO snippets (guild_id, name, title, description, color, fields, footer, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        req.user.guilds?.[0]?.id || 'global',
+        name.toLowerCase(),
+        title,
+        description,
+        color,
+        fields || '[]',
+        footer,
+        req.user.id
+    );
+
+    res.redirect('/snippets');
+});
+
+
+
 app.listen(3000, '0.0.0.0');
 
 // --- BOT EVENTS ---
@@ -959,6 +1100,65 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
     }
+
+    if (interaction.commandName === 'snippet') {
+        const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+        const isHelper = hasHelperRole(interaction.member, settings);
+
+        if (!isAdmin && !isHelper) {
+            return interaction.reply({
+                content: "❌ **Access Denied:** You need a Command Helper Role or Administrator permissions.",
+                ephemeral: true
+            });
+        }
+
+        const name = interaction.options.getString('name');
+
+        const snippet = db.prepare(`
+            SELECT * FROM snippets
+            WHERE guild_id = ? AND name = ? AND enabled = 1
+        `).get(interaction.guildId, name);
+
+        if (!snippet) {
+            return interaction.reply({
+                content: "❌ Snippet not found or disabled.",
+                ephemeral: true
+            });
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle(snippet.title || null)
+            .setDescription(snippet.description || null)
+            .setColor(snippet.color || IMPULSE_COLOR)
+            .setTimestamp();
+
+        if (snippet.footer) {
+            embed.setFooter({ text: snippet.footer });
+        }
+
+        // Optional fields
+        try {
+            const fields = JSON.parse(snippet.fields || '[]');
+            if (Array.isArray(fields) && fields.length) {
+                embed.addFields(fields);
+            }
+        } catch (err) {
+            console.error("Invalid snippet fields JSON:", err);
+        }
+
+        logAction(
+            interaction.guildId,
+            'SNIPPET',
+            `Used snippet: ${name}`,
+            userId,
+            userName,
+            userAvatar,
+            `/snippet name:${name}`
+        );
+
+        return interaction.reply({ embeds: [embed] });
+    }
+
 });
 
 client.login(process.env.DISCORD_TOKEN);

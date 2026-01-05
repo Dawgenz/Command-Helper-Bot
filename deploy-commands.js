@@ -32,6 +32,17 @@ const commands = [
                 .setDescription('Link to the original post')
                 .setRequired(true)),
 
+    // SNIPPET COMMAND
+    new SlashCommandBuilder()
+    .setName('snippet')
+    .setDescription('Send a saved embed snippet')
+    .addStringOption(option =>
+        option
+            .setName('name')
+            .setDescription('Snippet name')
+            .setRequired(true)
+    ),
+
     // SETUP COMMAND
     new SlashCommandBuilder()
         .setName('setup')
