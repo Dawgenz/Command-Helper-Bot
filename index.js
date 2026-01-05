@@ -423,6 +423,99 @@ app.get('/logs', async (req, res) => {
     </body></html>`);
 });
 
+app.get('/invite', (req, res) => {
+    // Required permissions for bot:
+    // - View Channels (1024)
+    // - Send Messages (2048)
+    // - Send Messages in Threads (274877906944)
+    // - Manage Threads (17179869184)
+    // - Embed Links (16384)
+    // - Attach Files (32768)
+    // - Read Message History (65536)
+    // - Use Slash Commands (2147483648)
+    // - Manage Messages (8192)
+    
+    const permissions = '274881134080';
+    const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`;
+    
+    const botAvatar = client.user.displayAvatarURL();
+    
+    res.send(`
+    <html>
+    ${getHead('Impulse | Add to Server')}
+    <body class="bg-[#0b0f1a] text-white min-h-screen flex items-center justify-center p-6">
+        <div class="max-w-2xl w-full">
+            <div class="text-center mb-8">
+                <div class="inline-block p-6 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_30px_rgba(255,170,0,0.4)] mb-6 animate-pulse">
+                    <img src="${botAvatar}" class="w-20 h-20 rounded-full">
+                </div>
+                <h1 class="text-5xl font-black tracking-tighter text-white uppercase mb-2">Impulse <span class="text-[#FFAA00]">Bot</span></h1>
+                <p class="text-slate-400 text-sm">Automated Forum Thread Management</p>
+            </div>
+            
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 shadow-2xl backdrop-blur-md mb-6">
+                <h2 class="text-xl font-bold text-[#FFAA00] mb-4 uppercase tracking-tight">What does Impulse do?</h2>
+                
+                <div class="space-y-3 mb-6">
+                    <div class="flex items-start gap-3 text-sm text-slate-300">
+                        <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
+                        <p><strong class="text-white">Auto-welcomes</strong> users in forum threads</p>
+                    </div>
+                    <div class="flex items-start gap-3 text-sm text-slate-300">
+                        <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
+                        <p><strong class="text-white">Auto-locks</strong> resolved threads after customizable time</p>
+                    </div>
+                    <div class="flex items-start gap-3 text-sm text-slate-300">
+                        <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
+                        <p><strong class="text-white">Duplicate detection</strong> to close repeat questions</p>
+                    </div>
+                    <div class="flex items-start gap-3 text-sm text-slate-300">
+                        <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
+                        <p><strong class="text-white">Web dashboard</strong> for viewing logs and analytics</p>
+                    </div>
+                </div>
+
+                <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-6">
+                    <p class="text-xs text-amber-200 leading-relaxed">
+                        <strong class="text-amber-400">⚠️ Required Permissions:</strong> 
+                        View Channels, Send Messages, Manage Threads, Embed Links, Read Message History, Use Slash Commands
+                    </p>
+                </div>
+
+                <a href="${inviteUrl}" target="_blank" class="block w-full text-center bg-[#FFAA00] hover:bg-[#ffbb33] text-black py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(255,170,0,0.3)] hover:shadow-[0_0_30px_rgba(255,170,0,0.5)]">
+                    Add to Server
+                </a>
+            </div>
+
+            <div class="bg-slate-900/40 border border-slate-800/50 rounded-xl p-6 backdrop-blur-sm">
+                <h3 class="text-sm font-black text-[#FFAA00] mb-3 uppercase tracking-wider">Quick Setup Guide</h3>
+                <ol class="space-y-2 text-xs text-slate-400">
+                    <li class="flex gap-3">
+                        <span class="text-[#FFAA00] font-bold shrink-0">1.</span>
+                        <span>Click "Add to Server" and select your server</span>
+                    </li>
+                    <li class="flex gap-3">
+                        <span class="text-[#FFAA00] font-bold shrink-0">2.</span>
+                        <span>Run <code class="bg-black/40 px-2 py-0.5 rounded text-[#FFAA00] font-mono">/setup</code> in your server</span>
+                    </li>
+                    <li class="flex gap-3">
+                        <span class="text-[#FFAA00] font-bold shrink-0">3.</span>
+                        <span>Configure your forum channel and helper roles</span>
+                    </li>
+                    <li class="flex gap-3">
+                        <span class="text-[#FFAA00] font-bold shrink-0">4.</span>
+                        <span>You're all set! The bot will start monitoring threads automatically</span>
+                    </li>
+                </ol>
+            </div>
+
+            <div class="text-center mt-8">
+                <a href="/" class="text-slate-500 text-xs hover:text-[#FFAA00] transition uppercase tracking-widest font-bold">← Back to Dashboard</a>
+            </div>
+        </div>
+    </body></html>`);
+});
+
 app.listen(3000, '0.0.0.0');
 
 // --- BOT EVENTS ---
