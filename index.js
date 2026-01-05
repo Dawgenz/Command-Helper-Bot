@@ -67,11 +67,11 @@ try {
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
 
 function getNav(activePage, user) {
+    const current = activePage === 'home' ? 'overview' : activePage;
     const pages = ['overview', 'snippets', 'threads', 'logs'];
     
-    // Logic for user profile section
     const profileSection = user ? `
-        <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800">
+        <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 shadow-xl">
             <div class="text-right hidden sm:block">
                 <p class="text-[10px] font-black text-white uppercase leading-none">${user.username}</p>
                 <a href="/logout" class="text-[8px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Terminate Session</a>
@@ -83,9 +83,7 @@ function getNav(activePage, user) {
     return `
     <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
         <div class="flex items-center gap-4">
-            <div class="w-10 h-10 bg-[#FFAA00] rounded-xl flex items-center justify-center shadow-lg shadow-amber-500/20">
-                <span class="text-black font-black text-xl">I</span>
-            </div>
+            <img src="${client.user.displayAvatarURL()}" class="w-10 h-10 rounded-xl shadow-lg border border-[#FFAA00]/30">
             <div>
                 <h1 class="text-lg font-black text-white uppercase tracking-tighter leading-none">Impulse</h1>
                 <p class="text-[8px] font-bold text-[#FFAA00] uppercase tracking-[0.3em]">Bot Dashboard</p>
@@ -95,7 +93,7 @@ function getNav(activePage, user) {
         <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-md">
             ${pages.map(p => `
                 <a href="/${p === 'overview' ? '' : p}" 
-                   class="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activePage === p ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'text-slate-500 hover:text-white'}">
+                   class="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${current === p ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'text-slate-500 hover:text-white'}">
                     ${p}
                 </a>
             `).join('')}
@@ -488,6 +486,10 @@ app.get('/logs', async (req, res) => {
 
     const managedGuildIds = getManagedGuilds(req.user.id);
 
+    if (managedGuildIds.length === 0) {
+        return res.send(getErrorPage("No Access", "You don't have permission to view logs from any servers."));
+    }
+
     let query = `SELECT * FROM audit_logs WHERE guild_id IN (${managedGuildIds.map(() => '?').join(',')})`;
     let params = [...managedGuildIds];
 
@@ -515,26 +517,50 @@ app.get('/logs', async (req, res) => {
         };
     });
 
-    // Get unique actions and servers for the chips
-    const allActions = ['SNIPPET_CREATE', 'SNIPPET_UPDATE', 'SNIPPET_DELETE', 'LOCK', 'SETUP', 'RESOLVED'];
-    const managedGuilds = getManagedGuilds(req.user.id).map(id => ({ id, name: client.guilds.cache.get(id)?.name || id }));
+    const allActions = [
+        'SNIPPET_CREATE', 
+        'SNIPPET_UPDATE', 
+        'SNIPPET_DELETE', 
+        'SNIPPET',
+        'LOCK', 
+        'CANCEL',
+        'GREET',
+        'DUPLICATE',
+        'SETUP', 
+        'RESOLVED',
+        'ANSWERED',
+        'AUTO_CLOSE'
+    ];
+    
+    const managedGuilds = managedGuildIds.map(id => {
+        const guild = client.guilds.cache.get(id);
+        return { id, name: guild ? guild.name : `Server ${id.slice(-4)}` };
+    });
 
     res.send(`
     <html>
     ${getHead('Impulse | Audit Logs')}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-8">
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-6xl mx-auto">
             ${getNav('logs', req.user)}
 
-            <div class="space-y-4 mb-8">
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter mb-2">Audit <span class="text-[#FFAA00]">Logs</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">System event archive & activity monitoring</p>
+            </div>
+
+            <div class="space-y-6 mb-8">
                 <div>
-                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Action</p>
+                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Action Type</p>
                     <div class="flex flex-wrap gap-2">
-                        <a href="/logs" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${!filterAction ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">All</a>
-                        ${allActions.map(a => `
-                            <a href="/logs?action=${a}${filterGuild ? `&guild=${filterGuild}` : ''}" 
-                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${filterAction === a ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">
-                                ${a.replace('_', ' ')}
+                        <a href="/logs${filterGuild ? `?guild=${filterGuild}` : ''}" 
+                           class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!filterAction ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
+                            All Actions
+                        </a>
+                        ${allActions.map(action => `
+                            <a href="/logs?action=${action}${filterGuild ? `&guild=${filterGuild}` : ''}" 
+                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filterAction === action ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
+                                ${action.replace(/_/g, ' ')}
                             </a>
                         `).join('')}
                     </div>
@@ -543,10 +569,13 @@ app.get('/logs', async (req, res) => {
                 <div>
                     <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Server</p>
                     <div class="flex flex-wrap gap-2">
-                        <a href="/logs" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${!filterGuild ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">Global</a>
+                        <a href="/logs${filterAction ? `?action=${filterAction}` : ''}" 
+                           class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!filterGuild ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
+                            All Servers
+                        </a>
                         ${managedGuilds.map(g => `
                             <a href="/logs?guild=${g.id}${filterAction ? `&action=${filterAction}` : ''}" 
-                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${filterGuild === g.id ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">
+                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filterGuild === g.id ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
                                 ${g.name}
                             </a>
                         `).join('')}
@@ -555,43 +584,89 @@ app.get('/logs', async (req, res) => {
             </div>
 
             <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
-                <table class="w-full text-left">
-                    <thead class="bg-slate-900/60 border-b border-slate-800">
-                        <tr>
-                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Timestamp</th>
-                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Source</th>
-                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Action</th>
-                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">User</th>
-                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Details</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800/40">
-                        ${logs.map(l => `
-                            <tr class="hover:bg-white/5 transition-colors cursor-pointer">
-                                <td class="p-4 text-[10px] text-slate-500 whitespace-nowrap">${l.timestamp}</td>
-                                <td class="p-4"><span class="text-[10px] font-black text-[#FFAA00] uppercase bg-[#FFAA00]/5 px-2 py-1 rounded border border-[#FFAA00]/10">${l.displayName}</span></td>
-                                <td class="p-4"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${l.actionStyle}">${l.action}</span></td>
-                                <td class="p-4">
-                                    <div class="flex items-center gap-2">
-                                        <img src="${l.user_avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" class="w-5 h-5 rounded-full border border-slate-700">
-                                        <span class="text-xs font-bold text-slate-300">${l.user_name || 'SYSTEM'}</span>
-                                    </div>
-                                </td>
-                                <td class="p-4 text-xs text-slate-400">
-                                    <details class="group">
-                                        <summary class="list-none flex items-center justify-between hover:text-white transition-all">
-                                            <span>${l.details}</span>
-                                            <svg class="w-3 h-3 text-slate-600 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                                        </summary>
-                                        <div class="mt-3 p-3 bg-black/40 rounded-lg border border-slate-800 font-mono text-[10px] text-blue-400 overflow-x-auto">
-                                            <span class="text-slate-600 mr-2">>_</span>${l.command_used || 'N/A (Automated Event)'}
-                                        </div>
-                                    </details>
-                                </td>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse min-w-[800px]">
+                        <thead class="bg-slate-900/60 border-b border-slate-800">
+                            <tr>
+                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Timestamp</th>
+                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Source</th>
+                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Action</th>
+                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">User</th>
+                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Details</th>
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40">
+                            ${logs.length > 0 ? logs.map(l => {
+                                const date = new Date(l.timestamp);
+                                const formattedDate = date.toLocaleDateString('en-US', { 
+                                    month: 'short', 
+                                    day: 'numeric',
+                                    year: 'numeric'
+                                });
+                                const formattedTime = date.toLocaleTimeString('en-US', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit',
+                                    hour12: false
+                                });
+                                
+                                return `
+                                <tr class="hover:bg-white/5 transition-colors">
+                                    <td class="p-4 text-[10px] text-slate-500 whitespace-nowrap font-mono">
+                                        <div class="font-bold">${formattedDate}</div>
+                                        <div class="text-slate-600">${formattedTime}</div>
+                                    </td>
+                                    <td class="p-4">
+                                        <span class="text-[10px] font-black text-[#FFAA00] uppercase bg-[#FFAA00]/5 px-2 py-1 rounded border border-[#FFAA00]/10">
+                                            ${l.displayName}
+                                        </span>
+                                    </td>
+                                    <td class="p-4">
+                                        <span class="px-2 py-1 rounded border text-[9px] font-bold uppercase ${l.actionStyle}">
+                                            ${l.action}
+                                        </span>
+                                    </td>
+                                    <td class="p-4">
+                                        <div class="flex items-center gap-2">
+                                            <img src="${l.user_avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
+                                                 class="w-6 h-6 rounded-full border border-slate-700">
+                                            <span class="text-xs font-bold text-slate-300">${l.user_name || 'SYSTEM'}</span>
+                                        </div>
+                                    </td>
+                                    <td class="p-4">
+                                        <details class="group">
+                                            <summary class="list-none flex items-center justify-between hover:text-white transition-all cursor-pointer text-xs text-slate-400">
+                                                <span class="truncate max-w-md">${l.details}</span>
+                                                <svg class="w-3 h-3 text-slate-600 group-open:rotate-180 transition-transform shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                </svg>
+                                            </summary>
+                                            <div class="mt-3 p-3 bg-black/40 rounded-lg border border-slate-800 font-mono text-[10px] text-blue-400">
+                                                <span class="text-slate-600 mr-2">>_</span>${l.command_used || 'N/A (Automated Event)'}
+                                            </div>
+                                        </details>
+                                    </td>
+                                </tr>
+                            `}).join('') : `
+                                <tr>
+                                    <td colspan="5" class="p-8 text-center text-slate-500">
+                                        <div class="flex flex-col items-center gap-3">
+                                            <svg class="w-12 h-12 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                            </svg>
+                                            <p class="text-sm font-bold uppercase tracking-widest">No logs found</p>
+                                            <p class="text-xs">Try adjusting your filters</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="mt-6 text-center text-xs text-slate-600 font-mono">
+                Showing ${logs.length} ${logs.length === 1 ? 'entry' : 'entries'} • Last updated: ${new Date().toLocaleTimeString()}
             </div>
         </div>
     </body>
