@@ -116,7 +116,10 @@ const getActionColor = (action) => {
         'DUPLICATE': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
         'RESOLVED': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
         'LOCK': 'bg-rose-500/10 text-rose-500 border-rose-500/20',
-        'GREET': 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+        'GREET': 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+        'CANCEL': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+        'ANSWERED': 'bg-green-500/10 text-green-500 border-green-500/20',
+        'AUTO_CLOSE': 'bg-gray-500/10 text-gray-500 border-gray-500/20'
     };
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
@@ -247,19 +250,10 @@ app.get('/', async (req, res) => {
                 </div>
                 <div class="divide-y divide-slate-800/40">
                     ${logs.map(l => {
-                        const date = new Date(l.timestamp);
-                        const timeStr = date.toLocaleTimeString('en-US', { 
-                            month: '2-digit', 
-                            day: '2-digit', 
-                            hour: '2-digit', 
-                            minute: '2-digit',
-                            second: '2-digit',
-                            hour12: false 
-                        }).replace(',', '');
                         return `
                         <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
-                            <div class="hidden md:block text-[10px] mono text-slate-600 w-20 text-right shrink-0">
-                                ${timeStr}
+                            <div class="hidden md:block text-[10px] mono text-slate-600 w-20 text-right shrink-0" data-timestamp="${l.timestamp}">
+                                --:--:--
                             </div>
                             <div class="w-20 flex items-center justify-center shrink-0">
                                 <span class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} inline-block text-center min-w-[70px]">
@@ -317,7 +311,27 @@ app.get('/', async (req, res) => {
                     }
                 });
             }
-            setInterval(updateTimers, 1000); updateTimers();
+            
+            // Update timestamps to user's local timezone
+            function updateTimestamps() {
+                document.querySelectorAll('[data-timestamp]').forEach(el => {
+                    const timestamp = el.getAttribute('data-timestamp');
+                    const date = new Date(timestamp);
+                    const timeStr = date.toLocaleTimeString('en-US', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                    }).replace(',', '');
+                    el.innerText = timeStr;
+                });
+            }
+            
+            setInterval(updateTimers, 1000); 
+            updateTimers();
+            updateTimestamps();
         </script>
     </body></html>`);
 });
@@ -362,6 +376,9 @@ app.get('/logs', async (req, res) => {
                         <button onclick="filterType('RESOLVED', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">RESOLVED</button>
                         <button onclick="filterType('DUPLICATE', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">DUPLICATE</button>
                         <button onclick="filterType('GREET', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">GREET</button>
+                        <button onclick="filterType('CANCEL', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">CANCEL</button>
+                        <button onclick="filterType('ANSWERED', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">ANSWERED</button>
+                        <button onclick="filterType('AUTO_CLOSE', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">AUTO_CLOSE</button>
                     </div>
                 </div>
 
@@ -523,17 +540,6 @@ app.get('/logs', async (req, res) => {
 });
 
 app.get('/invite', (req, res) => {
-    // Required permissions for bot:
-    // - View Channels (1024)
-    // - Send Messages (2048)
-    // - Send Messages in Threads (274877906944)
-    // - Manage Threads (17179869184)
-    // - Embed Links (16384)
-    // - Attach Files (32768)
-    // - Read Message History (65536)
-    // - Use Slash Commands (2147483648)
-    // - Manage Messages (8192)
-    
     const permissions = '274881134080';
     const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`;
     
@@ -545,15 +551,15 @@ app.get('/invite', (req, res) => {
     <body class="bg-[#0b0f1a] text-white min-h-screen flex items-center justify-center p-6">
         <div class="max-w-2xl w-full">
             <div class="text-center mb-8">
-                <div class="inline-block p-6 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_30px_rgba(255,170,0,0.4)] mb-6 animate-pulse">
-                    <img src="${botAvatar}" class="w-20 h-20 rounded-full">
+                <div class="inline-flex items-center justify-center p-4 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_30px_rgba(255,170,0,0.4)] mb-6">
+                    <img src="${botAvatar}" class="w-16 h-16 rounded-full">
                 </div>
-                <h1 class="text-5xl font-black tracking-tighter text-white uppercase mb-2">Impulse <span class="text-[#FFAA00]">Bot</span></h1>
+                <h1 class="text-4xl md:text-5xl font-black tracking-tighter text-white uppercase mb-2">Impulse <span class="text-[#FFAA00]">Bot</span></h1>
                 <p class="text-slate-400 text-sm">Automated Forum Thread Management</p>
             </div>
             
-            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 shadow-2xl backdrop-blur-md mb-6">
-                <h2 class="text-xl font-bold text-[#FFAA00] mb-4 uppercase tracking-tight">What does Impulse do?</h2>
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl backdrop-blur-md mb-6">
+                <h2 class="text-lg md:text-xl font-bold text-[#FFAA00] mb-4 uppercase tracking-tight">What does Impulse do?</h2>
                 
                 <div class="space-y-3 mb-6">
                     <div class="flex items-start gap-3 text-sm text-slate-300">
@@ -566,7 +572,15 @@ app.get('/invite', (req, res) => {
                     </div>
                     <div class="flex items-start gap-3 text-sm text-slate-300">
                         <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
+                        <p><strong class="text-white">Auto-closes</strong> threads inactive for 30+ days</p>
+                    </div>
+                    <div class="flex items-start gap-3 text-sm text-slate-300">
+                        <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
                         <p><strong class="text-white">Duplicate detection</strong> to close repeat questions</p>
+                    </div>
+                    <div class="flex items-start gap-3 text-sm text-slate-300">
+                        <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
+                        <p><strong class="text-white">Unanswered tracking</strong> with automatic tag management</p>
                     </div>
                     <div class="flex items-start gap-3 text-sm text-slate-300">
                         <span class="text-[#FFAA00] text-lg shrink-0">✓</span>
@@ -599,7 +613,7 @@ app.get('/invite', (req, res) => {
                     </li>
                     <li class="flex gap-3">
                         <span class="text-[#FFAA00] font-bold shrink-0">3.</span>
-                        <span>Configure your forum channel and helper roles</span>
+                        <span>Configure your forum channel, helper roles, and tags</span>
                     </li>
                     <li class="flex gap-3">
                         <span class="text-[#FFAA00] font-bold shrink-0">4.</span>
@@ -622,6 +636,8 @@ const IMPULSE_COLOR = 0xFFAA00;
 
 client.once('clientReady', (c) => {
     console.log(`✅ Logged in as ${c.user.tag}`);
+    
+    // Timer for locking resolved threads
     setInterval(async () => {
         const rows = db.prepare('SELECT * FROM pending_locks WHERE lock_at <= ?').all(Date.now());
         for (const row of rows) {
@@ -647,11 +663,59 @@ client.once('clientReady', (c) => {
             db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(row.thread_id);
         }
     }, 60000);
+
+    // Timer for auto-closing threads older than 30 days
+    setInterval(async () => {
+        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        const oldThreads = db.prepare('SELECT * FROM thread_tracking WHERE created_at <= ?').all(thirtyDaysAgo);
+        
+        for (const tracked of oldThreads) {
+            const settings = getSettings(tracked.guild_id);
+            if (!settings) continue;
+            
+            try {
+                const thread = await client.channels.fetch(tracked.thread_id);
+                if (thread && !thread.locked) {
+                    await thread.setLocked(true);
+                    
+                    const autoCloseEmbed = new EmbedBuilder()
+                        .setTitle("🔒 Thread Auto-Closed")
+                        .setDescription("This thread has been automatically closed due to 30+ days of inactivity. If you still need help, please create a new thread.")
+                        .setColor(0x6B7280)
+                        .setTimestamp()
+                        .setFooter({ text: "Impulse Bot • Auto-Close" });
+                    
+                    await thread.send({ embeds: [autoCloseEmbed] });
+                    logAction(tracked.guild_id, 'AUTO_CLOSE', `Auto-closed old thread: ${thread.name}`);
+                }
+            } catch (e) { 
+                console.error("Auto-close error:", e); 
+            }
+            
+            db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
+        }
+    }, 6 * 60 * 60 * 1000); // Check every 6 hours
 });
 
 client.on('threadCreate', async (thread) => {
     const settings = getSettings(thread.guildId);
     if (!settings || thread.parentId !== settings.forum_id) return;
+
+    // Track thread creation time for auto-closing
+    db.prepare('INSERT OR REPLACE INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)').run(
+        thread.id,
+        thread.guildId,
+        Date.now()
+    );
+
+    // Apply unanswered tag if configured
+    if (settings.unanswered_tag) {
+        try {
+            await thread.setAppliedTags([settings.unanswered_tag]);
+        } catch (e) {
+            console.error("Error applying unanswered tag:", e);
+        }
+    }
 
     const welcomeEmbed = new EmbedBuilder()
         .setTitle("Welcome to Support!")
@@ -671,11 +735,31 @@ client.on('threadCreate', async (thread) => {
     logAction(thread.guildId, 'GREET', `Welcomed user in ${thread.name}`);
 });
 
+// Remove unanswered tag when a non-bot user replies
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.channel.isThread()) return;
+
+    const settings = getSettings(message.guildId);
+    if (!settings || !settings.unanswered_tag) return;
+    if (message.channel.parentId !== settings.forum_id) return;
+
+    try {
+        const currentTags = message.channel.appliedTags;
+        if (currentTags.includes(settings.unanswered_tag)) {
+            const newTags = currentTags.filter(tag => tag !== settings.unanswered_tag);
+            await message.channel.setAppliedTags(newTags);
+            logAction(message.guildId, 'ANSWERED', `Removed unanswered tag from: ${message.channel.name}`);
+        }
+    } catch (e) {
+        console.error("Error removing unanswered tag:", e);
+    }
+});
+
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     const settings = getSettings(interaction.guildId);
 
-    // Extract user info for logging
     const userId = interaction.user.id;
     const userName = interaction.user.username;
     const userAvatar = interaction.user.displayAvatarURL();
@@ -691,15 +775,17 @@ client.on('interactionCreate', async (interaction) => {
         const forum = interaction.options.getChannel('forum');
         const resTag = interaction.options.getString('resolved_tag');
         const dupTag = interaction.options.getString('duplicate_tag');
+        const unansTag = interaction.options.getString('unanswered_tag') || null;
         const rawRoles = interaction.options.getString('helper_roles');
         const cleanRoles = rawRoles.replace(/\s+/g, ''); 
 
-        db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(
+        db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, unanswered_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
             interaction.guildId, 
             interaction.guild.name, 
             forum.id, 
             resTag, 
-            dupTag, 
+            dupTag,
+            unansTag,
             cleanRoles
         );
 
@@ -718,7 +804,7 @@ client.on('interactionCreate', async (interaction) => {
             .addFields(
                 { name: "Forum Channel", value: `<#${forum.id}>`, inline: true },
                 { name: "Helper Roles", value: cleanRoles.split(',').map(id => `<@&${id}>`).join(' '), inline: true },
-                { name: "Tags Configured", value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\``, inline: false }
+                { name: "Tags Configured", value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\`${unansTag ? `\nUnanswered: \`${unansTag}\`` : ''}`, inline: false }
             )
             .setColor(IMPULSE_COLOR)
             .setTimestamp()
@@ -783,14 +869,46 @@ client.on('interactionCreate', async (interaction) => {
         const resolvedEmbed = new EmbedBuilder()
             .setTitle("✅ Thread Marked as Resolved")
             .setDescription(
-                `This thread will automatically lock in **${customMinutes} minutes**.\n\n` +
-                `If you need to reopen this thread or have additional questions, please contact a moderator before it locks.`
+                `This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R>.\n\n` +
+                `If you need to reopen this thread or have additional questions, use \`/cancel\` before it locks or contact a moderator.`
             )
             .setColor(0x10B981)
-            .setTimestamp(lockTime)
-            .setFooter({ text: `Locks at` });
+            .setTimestamp()
+            .setFooter({ text: `Impulse Bot • Locks at ${new Date(lockTime).toLocaleTimeString()}` });
         
         await interaction.reply({ embeds: [resolvedEmbed] });
+    }
+
+    if (interaction.commandName === 'cancel') {
+        const existing = db.prepare('SELECT * FROM pending_locks WHERE thread_id = ?').get(interaction.channelId);
+        
+        if (!existing) {
+            return interaction.reply({ 
+                content: "❌ There is no pending lock timer for this thread.", 
+                ephemeral: true 
+            });
+        }
+        
+        db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(interaction.channelId);
+        
+        logAction(
+            interaction.guildId,
+            'CANCEL',
+            `Cancelled lock timer for: ${interaction.channel.name}`,
+            userId,
+            userName,
+            userAvatar,
+            '/cancel'
+        );
+        
+        const cancelEmbed = new EmbedBuilder()
+            .setTitle("🔓 Lock Timer Cancelled")
+            .setDescription("The automatic lock has been cancelled. This thread will remain open.")
+            .setColor(0xF59E0B)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot" });
+        
+        await interaction.reply({ embeds: [cancelEmbed] });
     }
 
     if (interaction.commandName === 'duplicate') {

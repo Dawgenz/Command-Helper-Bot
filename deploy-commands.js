@@ -11,7 +11,12 @@ const commands = [
                 .setDescription('Minutes until lock (default: 30, max: 1440)')
                 .setRequired(false)
                 .setMinValue(1)
-                .setMaxValue(1440)), // Max 24 hours
+                .setMaxValue(1440)),
+    
+    // CANCEL COMMAND - New command to cancel pending locks
+    new SlashCommandBuilder()
+        .setName('cancel')
+        .setDescription('Cancel the automatic lock timer for this thread'),
     
     // INFO COMMAND
     new SlashCommandBuilder()
@@ -48,7 +53,11 @@ const commands = [
         .addStringOption(option => 
             option.setName('duplicate_tag')
                 .setDescription('The ID of the Duplicate tag')
-                .setRequired(true)),
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('unanswered_tag')
+                .setDescription('The ID of the Unanswered tag (optional)')
+                .setRequired(false)),
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
