@@ -313,7 +313,6 @@ app.get('/', async (req, res) => {
     }
 
     const botAvatar = client.user.displayAvatarURL();
-    const userAvatar = `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`;
     const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
     const authorizedGuilds = [];
 
@@ -324,74 +323,109 @@ app.get('/', async (req, res) => {
             const member = await guild.members.fetch(req.user.id);
             if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
                 const timers = db.prepare('SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?').all(settings.guild_id);
-                authorizedGuilds.push({ ...settings, timers });
+                const snippetCount = db.prepare('SELECT COUNT(*) as count FROM snippets WHERE guild_id = ?').get(settings.guild_id).count;
+                authorizedGuilds.push({ ...settings, timers, snippetCount });
             }
         } catch (e) {}
     }
 
-    const logs = db.prepare(`
+    const recentLogs = db.prepare(`
         SELECT audit_logs.*, guild_settings.guild_name 
         FROM audit_logs 
         LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
-        ORDER BY timestamp DESC LIMIT 10
+        ORDER BY timestamp DESC LIMIT 5
     `).all();
+
+    const totalSnippets = db.prepare('SELECT COUNT(*) as count FROM snippets').get().count;
+    const totalLocks = db.prepare('SELECT COUNT(*) as count FROM pending_locks').get().count;
+    const totalLogs = db.prepare('SELECT COUNT(*) as count FROM audit_logs').get().count;
 
     res.send(`
     <html>
-    ${getHead('Impulse | Bot Dashboard')}
+    ${getHead('Impulse | Dashboard Overview')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-4 md:p-8">
         <div class="max-w-6xl mx-auto">
-            <header class="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
-                <div class="flex items-center gap-4">
-                    <img src="${botAvatar}" class="w-12 h-12 md:w-14 md:h-14 rounded-full border-2 border-[#FFAA00] shadow-[0_0_15px_rgba(255,170,0,0.4)]">
-                    <div>
-                        <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tighter leading-none">IMPULSE</h1>
-                        <span class="text-[#FFAA00] text-[10px] md:text-xs font-mono tracking-[0.3em] uppercase">Bot Dashboard</span>
-                    </div>
-                </div>
-                <div class="flex items-center gap-3">
-                    <a href="/invite" class="w-10 h-10 md:w-11 md:h-11 rounded-full bg-slate-900/80 border-2 border-[#FFAA00]/30 hover:border-[#FFAA00] hover:bg-slate-800 transition flex items-center justify-center group" title="Add Bot">
-                        <svg class="w-5 h-5 text-[#FFAA00] group-hover:scale-110 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                        </svg>
-                    </a>
-                    <div class="flex items-center gap-3 bg-slate-900/80 p-2 pr-5 rounded-full border border-slate-800">
-                        <img src="${userAvatar}" class="w-8 h-8 md:w-10 md:h-10 rounded-full border border-[#FFAA00]/50">
-                        <div class="flex flex-col">
-                            <span class="text-xs md:text-sm font-bold text-white leading-none">${req.user.username}</span>
-                            <a href="/logout" class="text-[9px] text-rose-500 hover:underline uppercase font-bold tracking-widest mt-1">Disconnect</a>
-                        </div>
-                    </div>
-                </div>
-            </header>
+            ${getNav('overview', req.user)}
 
-            ${getNav('home', req.user)}
-
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
-                ${authorizedGuilds.map(s => `
-                    <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition shadow-lg">
-                        <h3 class="text-[#FFAA00] uppercase text-[10px] font-black mb-4 tracking-widest opacity-80 truncate">${s.guild_name}</h3>
-                        <div class="space-y-2">
-                            ${s.timers.length > 0 ? s.timers.map(t => `
-                                <div class="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-slate-800/50">
-                                    <span class="text-[10px] mono text-slate-500">ID:${t.thread_id.slice(-5)}</span>
-                                    <span class="text-xs font-bold text-emerald-400 mono" data-expire="${t.lock_at}">--:--</span>
-                                </div>
-                            `).join('') : '<div class="text-slate-600 text-xs py-2 italic text-center">No active lockdown timers</div>'}
-                        </div>
-                    </div>`).join('')}
+            <div class="mb-10">
+                <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
+                    System <span class="text-[#FFAA00]">Overview</span>
+                </h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Real-time monitoring & statistics</p>
             </div>
 
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Servers</h3>
+                        <svg class="w-5 h-5 text-[#FFAA00]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                        </svg>
+                    </div>
+                    <p class="text-4xl font-black text-white">${authorizedGuilds.length}</p>
+                    <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Monitored guilds</p>
+                </div>
+
+                <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-emerald-500/30 transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Pending Locks</h3>
+                        <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-4xl font-black text-white">${totalLocks}</p>
+                    <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Active timers</p>
+                </div>
+
+                <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-blue-500/30 transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total Snippets</h3>
+                        <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-4xl font-black text-white">${totalSnippets}</p>
+                    <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Saved templates</p>
+                </div>
+            </div>
+
+            <!-- Server Cards -->
+            <div class="mb-10">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-black text-white uppercase tracking-tight">Managed Servers</h2>
+                    <a href="/threads" class="text-[#FFAA00] text-[9px] font-black tracking-widest hover:underline uppercase">View All →</a>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    ${authorizedGuilds.slice(0, 6).map(s => `
+                        <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition shadow-lg">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-[#FFAA00] uppercase text-[10px] font-black tracking-widest opacity-80 truncate flex-1">${s.guild_name}</h3>
+                                <span class="text-[8px] bg-slate-800 px-2 py-1 rounded text-slate-500 font-bold">${s.snippetCount} SNIPPETS</span>
+                            </div>
+                            <div class="space-y-2">
+                                ${s.timers.length > 0 ? s.timers.slice(0, 3).map(t => `
+                                    <div class="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-slate-800/50">
+                                        <span class="text-[10px] mono text-slate-500">ID:${t.thread_id.slice(-5)}</span>
+                                        <span class="text-xs font-bold text-emerald-400 mono" data-expire="${t.lock_at}">--:--</span>
+                                    </div>
+                                `).join('') : '<div class="text-slate-600 text-xs py-2 italic text-center">No active timers</div>'}
+                            </div>
+                        </div>`).join('')}
+                </div>
+            </div>
+
+            <!-- Recent Activity -->
             <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
                 <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/20">
                     <h2 class="text-md md:text-lg font-bold text-white flex items-center gap-2 uppercase tracking-tight">
                         <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                        Live Feed
+                        Recent Activity
                     </h2>
-                    <a href="/logs" class="text-[#FFAA00] text-[9px] font-black tracking-widest hover:bg-[#FFAA00] hover:text-black transition px-4 py-2 rounded-lg border border-[#FFAA00]/20 uppercase">Audit Log</a>
+                    <a href="/logs" class="text-[#FFAA00] text-[9px] font-black tracking-widest hover:bg-[#FFAA00] hover:text-black transition px-4 py-2 rounded-lg border border-[#FFAA00]/20 uppercase">Full Logs</a>
                 </div>
                 <div class="divide-y divide-slate-800/40">
-                    ${logs.map(l => {
+                    ${recentLogs.map(l => {
                         return `
                         <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
                             <div class="hidden md:block text-[10px] mono text-slate-600 w-20 text-right shrink-0" data-timestamp="${l.timestamp}">
@@ -410,6 +444,9 @@ app.get('/', async (req, res) => {
                             </div>
                         </div>
                     `}).join('')}
+                </div>
+                <div class="p-4 bg-slate-900/20 text-center">
+                    <p class="text-[10px] text-slate-600 font-mono">Total Events: ${totalLogs.toLocaleString()}</p>
                 </div>
             </div>
 
@@ -454,11 +491,10 @@ app.get('/', async (req, res) => {
                 });
             }
             
-            // Update timestamps to user's local timezone
             function updateTimestamps() {
                 document.querySelectorAll('[data-timestamp]').forEach(el => {
                     const timestamp = el.getAttribute('data-timestamp');
-                    const date = new Date(timestamp + 'Z'); // Ensure UTC
+                    const date = new Date(timestamp + 'Z');
                     const timeStr = date.toLocaleTimeString('en-US', {
                         month: '2-digit',
                         day: '2-digit',
@@ -669,6 +705,185 @@ app.get('/logs', async (req, res) => {
                 Showing ${logs.length} ${logs.length === 1 ? 'entry' : 'entries'} • Last updated: ${new Date().toLocaleTimeString()}
             </div>
         </div>
+    </body>
+    </html>
+    `);
+});
+
+app.get('/threads', async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+
+    const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
+    const authorizedGuilds = [];
+
+    for (const settings of allSettings) {
+        const guild = client.guilds.cache.get(settings.guild_id);
+        if (!guild) continue;
+        try {
+            const member = await guild.members.fetch(req.user.id);
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
+                const timers = db.prepare('SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?').all(settings.guild_id);
+                const threadTracking = db.prepare('SELECT COUNT(*) as count FROM thread_tracking WHERE guild_id = ?').get(settings.guild_id).count;
+                authorizedGuilds.push({ ...settings, timers, threadTracking });
+            }
+        } catch (e) {}
+    }
+
+    res.send(`
+    <html>
+    ${getHead('Impulse | Thread Management')}
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-6xl mx-auto">
+            ${getNav('threads', req.user)}
+
+            <div class="mb-10">
+                <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
+                    Thread <span class="text-[#FFAA00]">Management</span>
+                </h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Monitor active timers & thread automation</p>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                <div class="bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 backdrop-blur-md p-6 rounded-2xl border border-emerald-500/20 shadow-lg">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Active Timers</h3>
+                        <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-4xl font-black text-white mb-1">${authorizedGuilds.reduce((acc, g) => acc + g.timers.length, 0)}</p>
+                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Pending locks across all servers</p>
+                </div>
+
+                <div class="bg-gradient-to-br from-blue-500/10 to-blue-500/5 backdrop-blur-md p-6 rounded-2xl border border-blue-500/20 shadow-lg">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Tracked Threads</h3>
+                        <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-4xl font-black text-white mb-1">${authorizedGuilds.reduce((acc, g) => acc + g.threadTracking, 0)}</p>
+                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Threads monitored for auto-close</p>
+                </div>
+
+                <div class="bg-gradient-to-br from-amber-500/10 to-amber-500/5 backdrop-blur-md p-6 rounded-2xl border border-amber-500/20 shadow-lg">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-[10px] font-black text-amber-400 uppercase tracking-widest">Configured Servers</h3>
+                        <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-4xl font-black text-white mb-1">${authorizedGuilds.length}</p>
+                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">With active thread automation</p>
+                </div>
+            </div>
+
+            <!-- Server Thread Details -->
+            <div class="space-y-6">
+                ${authorizedGuilds.map(s => `
+                    <div class="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-800/50 overflow-hidden shadow-xl">
+                        <div class="p-6 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/20">
+                            <div>
+                                <h3 class="text-xl font-black text-white uppercase tracking-tight mb-1">${s.guild_name}</h3>
+                                <div class="flex items-center gap-4 text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+                                    <span>Forum: <span class="text-[#FFAA00]">#${s.forum_id.slice(-4)}</span></span>
+                                    <span>•</span>
+                                    <span>${s.timers.length} Active Timers</span>
+                                    <span>•</span>
+                                    <span>${s.threadTracking} Tracked</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] px-3 py-1.5 rounded-lg ${s.timers.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-500 border border-slate-700'} font-black uppercase">
+                                    ${s.timers.length > 0 ? 'Active' : 'Idle'}
+                                </span>
+                            </div>
+                        </div>
+
+                        ${s.timers.length > 0 ? `
+                            <div class="p-6">
+                                <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4">Pending Lock Queue</p>
+                                <div class="space-y-3">
+                                    ${s.timers.map(t => `
+                                        <div class="flex items-center justify-between bg-black/40 p-4 rounded-xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition">
+                                            <div class="flex items-center gap-4">
+                                                <div class="bg-slate-800 px-3 py-2 rounded-lg">
+                                                    <p class="text-[10px] mono text-slate-500 font-bold">ID: ${t.thread_id.slice(-8)}</p>
+                                                </div>
+                                                <div>
+                                                    <p class="text-xs font-bold text-white">Thread Lock Scheduled</p>
+                                                    <p class="text-[10px] text-slate-600 uppercase tracking-wider font-bold mt-0.5">Auto-lock timer running</p>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center gap-4">
+                                                <div class="text-right">
+                                                    <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Time Remaining</p>
+                                                    <p class="text-lg font-black text-emerald-400 mono" data-expire="${t.lock_at}">--:--</p>
+                                                </div>
+                                                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : `
+                            <div class="p-12 text-center">
+                                <svg class="w-12 h-12 text-slate-700 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <p class="text-sm font-bold text-slate-600 uppercase tracking-widest">All Clear</p>
+                                <p class="text-xs text-slate-700 mt-1">No pending thread locks</p>
+                            </div>
+                        `}
+
+                        <div class="p-4 bg-slate-900/20 border-t border-slate-800">
+                            <div class="flex items-center justify-between text-[10px]">
+                                <div class="flex items-center gap-6">
+                                    <span class="text-slate-600 uppercase font-bold tracking-wider">Configuration</span>
+                                    <span class="text-slate-500">Resolved Tag: <code class="text-[#FFAA00] bg-[#FFAA00]/10 px-2 py-0.5 rounded">${s.resolved_tag}</code></span>
+                                    <span class="text-slate-500">Duplicate Tag: <code class="text-sky-400 bg-sky-400/10 px-2 py-0.5 rounded">${s.duplicate_tag}</code></span>
+                                    ${s.unanswered_tag ? `<span class="text-slate-500">Unanswered Tag: <code class="text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">${s.unanswered_tag}</code></span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+
+            ${authorizedGuilds.length === 0 ? `
+                <div class="text-center py-20">
+                    <svg class="w-16 h-16 text-slate-700 mx-auto mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                    </svg>
+                    <h3 class="text-xl font-black text-white uppercase tracking-tight mb-2">No Servers Configured</h3>
+                    <p class="text-sm text-slate-500 mb-6">Add the bot to a server and run <code class="bg-slate-800 px-2 py-1 rounded text-[#FFAA00]">/setup</code> to get started</p>
+                    <a href="/invite" class="inline-block bg-[#FFAA00] text-black px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-[#ffbb33] transition">
+                        Add Bot to Server
+                    </a>
+                </div>
+            ` : ''}
+        </div>
+
+        <script>
+            function updateTimers() {
+                document.querySelectorAll('[data-expire]').forEach(el => {
+                    const diff = parseInt(el.getAttribute('data-expire')) - Date.now();
+                    if (diff <= 0) {
+                        el.innerText = "LOCKED";
+                        el.className = "text-lg font-black text-rose-500 mono uppercase";
+                    } else {
+                        const m = Math.floor(diff / 60000);
+                        const s = Math.floor((diff % 60000) / 1000);
+                        el.innerText = m + "m " + s + "s";
+                    }
+                });
+            }
+            setInterval(updateTimers, 1000); 
+            updateTimers();
+        </script>
     </body>
     </html>
     `);
