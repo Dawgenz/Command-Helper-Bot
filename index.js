@@ -136,6 +136,19 @@ const getHead = (title) => `
     </head>
 `;
 
+function canManageSnippet(req, snippet) {
+    const guild = client.guilds.cache.get(snippet.guild_id);
+    if (!guild) return false;
+
+    const member = guild.members.cache.get(req.user.id);
+    if (!member) return false;
+
+    return (
+        member.permissions.has(PermissionFlagsBits.Administrator) ||
+        hasHelperRole(member, getSettings(snippet.guild_id))
+    );
+}
+
 const getActionColor = (action) => {
     const colors = {
         'SETUP': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
@@ -251,7 +264,7 @@ app.get('/', async (req, res) => {
                 </div>
             </header>
 
-            ${getNav('snippets')}
+            ${getNav('home')}
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                 ${authorizedGuilds.map(s => `
@@ -660,10 +673,26 @@ app.get('/invite', (req, res) => {
 app.get('/snippets', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
+    const creator = await client.users.fetch(s.created_by).catch(() => null);
+    const allowedGuildIds = db.prepare(`
+        SELECT guild_id FROM guild_settings
+    `).all()
+      .map(g => g.guild_id)
+      .filter(gid => {
+          const guild = client.guilds.cache.get(gid);
+          if (!guild) return false;
+          const member = guild.members.cache.get(req.user.id);
+          return member && (
+              member.permissions.has(PermissionFlagsBits.Administrator) ||
+              hasHelperRole(member, getSettings(gid))
+          );
+      });
+
     const snippets = db.prepare(`
-        SELECT * FROM snippets
-        ORDER BY updated_at DESC
-    `).all();
+    SELECT * FROM snippets
+    WHERE guild_id IN (${allowedGuildIds.map(() => '?').join(',')})
+    ORDER BY updated_at DESC
+`).all(...allowedGuildIds);
 
     res.send(`
     <html>
@@ -684,11 +713,17 @@ app.get('/snippets', async (req, res) => {
                     <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
                         <div>
                             <p class="font-bold text-white">${s.name}</p>
+                            <p class="text-[10px] text-slate-500">Created by: ${creator ? creator.username : 'Unknown'}</p>
                             <p class="text-xs text-slate-400">${s.title || 'No title'}</p>
                         </div>
-                        <span class="text-[9px] uppercase font-black ${s.enabled ? 'text-emerald-400' : 'text-rose-500'}">
-                            ${s.enabled ? 'Enabled' : 'Disabled'}
-                        </span>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[9px] uppercase font-black ${s.enabled ? 'text-emerald-400' : 'text-rose-500'}">
+                                ${s.enabled ? 'Enabled' : 'Disabled'}
+                            </span>
+
+                            <a href="/snippets/edit/${s.id}" class="text-xs text-sky-400 hover:underline">Edit</a>
+                            <a href="/snippets/delete/${s.id}" class="text-xs text-rose-500 hover:underline">Delete</a>
+                        </div>
                     </div>
                 `).join('')}
             </div>
@@ -701,6 +736,17 @@ app.get('/snippets', async (req, res) => {
 app.get('/snippets/new', (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
+    const guilds = db.prepare(`SELECT * FROM guild_settings`).all().filter(g => {
+    const guild = client.guilds.cache.get(g.guild_id);
+    if (!guild) return false;
+    const member = guild.members.cache.get(req.user.id);
+    return member && (
+        member.permissions.has(PermissionFlagsBits.Administrator) ||
+        hasHelperRole(member, g)
+    );
+});
+
+
     res.send(`
     <html>
     ${getHead('Create Snippet')}
@@ -711,6 +757,14 @@ app.get('/snippets/new', (req, res) => {
             <h1 class="text-2xl font-black text-white mb-6 uppercase">Create Snippet</h1>
 
             <form method="POST" action="/snippets/new" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+              <select name="guild_id" required class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
+                <option value="">Select Server</option>
+                ${guilds.map(g => `
+                    <option value="${g.guild_id}">${g.guild_name}</option>
+                `).join('')}
+              </select>
+
                 <div class="space-y-4">
                     <input name="name" placeholder="snippet_name" required class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
                     <input name="title" placeholder="Embed title" class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
@@ -736,13 +790,29 @@ app.get('/snippets/new', (req, res) => {
         </div>
 
         <script>
-            const update = () => {
-                pTitle.innerText = title.value;
-                pDesc.innerText = description.value;
-                pFooter.innerText = footer.value;
-                preview.style.borderColor = color.value;
-            };
-            document.querySelectorAll('input, textarea').forEach(el => el.addEventListener('input', update));
+            const nameInput = document.querySelector('input[name="name"]');
+            const titleInput = document.querySelector('input[name="title"]');
+            const descInput = document.querySelector('textarea[name="description"]');
+            const footerInput = document.querySelector('input[name="footer"]');
+            const colorInput = document.querySelector('input[name="color"]');
+
+            const pTitle = document.getElementById('pTitle');
+            const pDesc = document.getElementById('pDesc');
+            const pFooter = document.getElementById('pFooter');
+            const preview = document.getElementById('preview');
+
+            function updatePreview() {
+                pTitle.innerText = titleInput.value || '';
+                pDesc.innerText = descInput.value || '';
+                pFooter.innerText = footerInput.value || '';
+                preview.style.borderColor = colorInput.value;
+            }
+
+            [titleInput, descInput, footerInput, colorInput].forEach(el =>
+                el.addEventListener('input', updatePreview)
+            );
+
+            updatePreview();
         </script>
     </body>
     </html>
@@ -750,13 +820,15 @@ app.get('/snippets/new', (req, res) => {
 });
 
 app.post('/snippets/new', express.urlencoded({ extended: true }), (req, res) => {
-    const { name, title, description, color, footer, fields } = req.body;
+    const { guild_id, name, title, description, color, footer, fields } = req.body;
 
     db.prepare(`
-        INSERT INTO snippets (guild_id, name, title, description, color, fields, footer, created_by)
+        INSERT INTO snippets (
+            guild_id, name, title, description, color, fields, footer, created_by
+        )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-        req.user.guilds?.[0]?.id || 'global',
+        guild_id,
         name.toLowerCase(),
         title,
         description,
@@ -765,6 +837,90 @@ app.post('/snippets/new', express.urlencoded({ extended: true }), (req, res) => 
         footer,
         req.user.id
     );
+
+    logAction(
+        guild_id,
+        'SNIPPET_CREATE',
+        `Created snippet: ${name}`,
+        req.user.id,
+        req.user.username,
+        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
+        '/snippet'
+    );
+
+    res.redirect('/snippets');
+});
+
+app.get('/snippets/edit/:id', (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    if (!canManageSnippet(req, snippet)) { return res.status(403).send("Forbidden");}
+
+    const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
+    if (!snippet) return res.redirect('/snippets');
+
+    res.send(`
+        <html>
+        ${getHead('Edit Snippet')}
+        <body class="bg-[#0b0f1a] text-slate-200 p-6">
+            <div class="max-w-4xl mx-auto">
+                ${getNav('snippets')}
+                <h1 class="text-2xl font-black text-white mb-6 uppercase">Edit Snippet</h1>
+
+                <form method="POST" action="/snippets/edit/${snippet.id}">
+                    <input name="title" value="${snippet.title || ''}" class="w-full bg-slate-900 p-3 mb-3 rounded">
+                    <textarea name="description" class="w-full bg-slate-900 p-3 mb-3 rounded">${snippet.description || ''}</textarea>
+                    <input name="color" type="color" value="${snippet.color || '#FFAA00'}">
+                    <input name="footer" value="${snippet.footer || ''}" class="w-full bg-slate-900 p-3 mt-3 rounded">
+                    <button class="bg-[#FFAA00] text-black px-6 py-3 mt-4 rounded-xl font-black uppercase text-xs">
+                        Update Snippet
+                    </button>
+                </form>
+            </div>
+        </body>
+        </html>
+    `);
+});
+
+app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), (req, res) => {
+    const { title, description, color, footer } = req.body;
+
+    db.prepare(`
+        UPDATE snippets
+        SET title = ?, description = ?, color = ?, footer = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    `).run(title, description, color, footer, req.params.id);
+
+    res.redirect('/snippets');
+});
+
+app.get('/snippets/delete/:id', (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    if (!canManageSnippet(req, snippet)) { return res.status(403).send("Forbidden");}
+
+    const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
+    if (!snippet) return res.redirect('/snippets');
+
+    db.prepare(`DELETE FROM snippets WHERE id = ?`).run(req.params.id);
+
+    logAction(
+        snippet.guild_id,
+        'SNIPPET_DELETE',
+        `Deleted snippet: ${snippet.name}`,
+        req.user.id,
+        req.user.username,
+        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`
+    );
+
+    res.redirect('/snippets');
+});
+
+app.get('/snippets/toggle/:id', (req, res) => {
+    const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
+    if (!snippet || !canManageSnippet(req, snippet)) return res.redirect('/snippets');
+
+    db.prepare(`
+        UPDATE snippets SET enabled = NOT enabled WHERE id = ?
+    `).run(snippet.id);
 
     res.redirect('/snippets');
 });
