@@ -92,7 +92,8 @@ app.get('/logout', (req, res) => {
 const getHead = (title) => `
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>${title}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"> 
+        <title>${title}</title>
         <link rel="icon" type="image/png" href="${client.user.displayAvatarURL()}">
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
@@ -316,7 +317,7 @@ app.get('/', async (req, res) => {
             function updateTimestamps() {
                 document.querySelectorAll('[data-timestamp]').forEach(el => {
                     const timestamp = el.getAttribute('data-timestamp');
-                    const date = new Date(timestamp);
+                    const date = new Date(timestamp + 'Z'); // Ensure UTC
                     const timeStr = date.toLocaleTimeString('en-US', {
                         month: '2-digit',
                         day: '2-digit',
@@ -406,7 +407,7 @@ app.get('/logs', async (req, res) => {
                     </thead>
                     <tbody id="logTableBody" class="mono text-[11px]">
                         ${allLogs.map((l, idx) => {
-                            const date = new Date(l.timestamp);
+                            const date = new Date(l.timestamp + 'Z'); // Ensure UTC
                             const dateStr = date.toLocaleDateString('en-US', { 
                                 weekday: 'long',
                                 month: 'long', 
@@ -548,8 +549,8 @@ app.get('/invite', (req, res) => {
     res.send(`
     <html>
     ${getHead('Impulse | Add to Server')}
-    <body class="bg-[#0b0f1a] text-white min-h-screen flex items-center justify-center p-6">
-        <div class="max-w-2xl w-full">
+    <body class="bg-[#0b0f1a] text-white min-h-screen flex items-start justify-center p-6 overflow-y-auto">
+        <div class="max-w-2xl w-full mt-8 mb-8">
             <div class="text-center mb-8">
                 <div class="inline-flex items-center justify-center p-4 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_30px_rgba(255,170,0,0.4)] mb-6">
                     <img src="${botAvatar}" class="w-16 h-16 rounded-full">
