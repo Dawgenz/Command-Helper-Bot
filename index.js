@@ -207,6 +207,11 @@ async function canManageSnippet(req, guild_id) {
 
 const getActionColor = (action) => {
     const colors = {
+        'SNIPPET': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+        'SNIPPET_CREATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+        'SNIPPET_UPDATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+        'SNIPPET_DELETE': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+        
         'SETUP': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
         'DUPLICATE': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
         'RESOLVED': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
@@ -216,6 +221,12 @@ const getActionColor = (action) => {
         'ANSWERED': 'bg-green-500/10 text-green-500 border-green-500/20',
         'AUTO_CLOSE': 'bg-gray-500/10 text-gray-500 border-gray-500/20'
     };
+    
+    if (!colors[action]) {
+        if (action.includes('SNIPPET')) return colors['SNIPPET'];
+        if (action.includes('DELETE')) return colors['SNIPPET_DELETE'];
+    }
+
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
 
@@ -435,217 +446,111 @@ app.get('/', async (req, res) => {
 
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    
-    const allowedGuildIds = db.prepare(`SELECT guild_id FROM guild_settings`).all()
-        .map(g => g.guild_id)
-        .filter(gid => {
-            const guild = client.guilds.cache.get(gid);
-            if (!guild) return false;
-            const member = guild.members.cache.get(req.user.id);
-            return member && (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, getSettings(gid)));
+
+    const filterAction = req.query.action;
+    const filterGuild = req.query.guild;
+
+    let query = `SELECT * FROM audit_logs`;
+    let params = [];
+
+    // Apply Filters to SQL
+    if (filterAction || filterGuild) {
+        query += " WHERE ";
+        if (filterAction && filterGuild) {
+            query += "action = ? AND guild_id = ?";
+            params.push(filterAction, filterGuild);
+        } else if (filterAction) {
+            query += "action = ?";
+            params.push(filterAction);
+        } else {
+            query += "guild_id = ?";
+            params.push(filterGuild);
+        }
+    }
+    query += " ORDER BY timestamp DESC LIMIT 100";
+
+    const rawLogs = db.prepare(query).all(...params);
+    const logs = rawLogs.map(log => {
+        const guild = client.guilds.cache.get(log.guild_id);
+        return {
+            ...log,
+            displayName: guild ? guild.name : `ID: ${log.guild_id}`,
+            actionStyle: getActionColor(log.action)
+        };
     });
 
-    if (allowedGuildIds.length === 0) {
-        return res.send(`<html>${getHead('Logs')} <body class="bg-[#0b0f1a] text-white p-8">${getNav('logs')} <p>No logs available.</p></body></html>`);
-    }
-
-    const allLogs = db.prepare(`
-        SELECT * FROM audit_logs 
-        WHERE guild_id IN (${allowedGuildIds.map(() => '?').join(',')}) 
-        ORDER BY timestamp DESC LIMIT 100
-    `).all(...allowedGuildIds);
-    
-    const uniqueServers = [...new Set(allLogs.map(l => l.guild_name).filter(Boolean))];
+    // Get unique actions and servers for the chips
+    const allActions = ['SNIPPET_CREATE', 'SNIPPET_UPDATE', 'SNIPPET_DELETE', 'LOCK', 'SETUP', 'RESOLVED'];
+    const managedGuilds = getManagedGuilds(req.user.id).map(id => ({ id, name: client.guilds.cache.get(id)?.name || id }));
 
     res.send(`
     <html>
     ${getHead('Impulse | Audit Logs')}
-    <body class="bg-[#0b0f1a] text-slate-200 p-4 md:p-8">
-        <div class="max-w-5xl mx-auto">
-            <div class="flex flex-col md:flex-row md:justify-between md:items-end mb-8 gap-4">
-                <div>
-                    <a href="/" class="text-[#FFAA00] text-[9px] font-black tracking-[0.2em] hover:underline uppercase">← Terminal Hub</a>
-                    <h1 class="text-3xl md:text-4xl font-black text-white mt-1 leading-none uppercase italic">Data Archive</h1>
-                </div>
-                <div class="relative w-full md:w-64">
-                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                    </svg>
-                    <input type="text" id="logSearch" placeholder="Search archive..." class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition">
-                </div>
-            </div>
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-8">
+        <div class="max-w-6xl mx-auto">
+            ${getNav('logs')}
 
-            <div class="space-y-6 mb-8">
+            <div class="space-y-4 mb-8">
                 <div>
-                    <p class="text-[8px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Filter: Action</p>
-                    <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                        <button onclick="filterType('ALL', this)" class="type-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL</button>
-                        <button onclick="filterType('SETUP', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">SETUP</button>
-                        <button onclick="filterType('LOCK', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">LOCK</button>
-                        <button onclick="filterType('RESOLVED', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">RESOLVED</button>
-                        <button onclick="filterType('DUPLICATE', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">DUPLICATE</button>
-                        <button onclick="filterType('GREET', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">GREET</button>
-                        <button onclick="filterType('CANCEL', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">CANCEL</button>
-                        <button onclick="filterType('ANSWERED', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">ANSWERED</button>
-                        <button onclick="filterType('AUTO_CLOSE', this)" class="type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">AUTO_CLOSE</button>
+                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Action</p>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="/logs" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${!filterAction ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">All</a>
+                        ${allActions.map(a => `
+                            <a href="/logs?action=${a}${filterGuild ? `&guild=${filterGuild}` : ''}" 
+                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${filterAction === a ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">
+                                ${a.replace('_', ' ')}
+                            </a>
+                        `).join('')}
                     </div>
                 </div>
 
                 <div>
-                    <p class="text-[8px] uppercase font-black text-slate-600 mb-2 tracking-[0.2em]">Filter: Server</p>
-                    <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                        <button onclick="filterServer('ALL', this)" class="srv-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter">ALL SOURCES</button>
-                        ${uniqueServers.map(srv => `
-                            <button onclick="filterServer('${srv}', this)" class="srv-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter">${srv}</button>
+                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Server</p>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="/logs" class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${!filterGuild ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">Global</a>
+                        ${managedGuilds.map(g => `
+                            <a href="/logs?guild=${g.id}${filterAction ? `&action=${filterAction}` : ''}" 
+                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${filterGuild === g.id ? 'bg-[#FFAA00] text-black' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'}">
+                                ${g.name}
+                            </a>
                         `).join('')}
                     </div>
                 </div>
             </div>
 
-            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-sm shadow-xl">
-                <table class="w-full text-left border-collapse">
-                    <thead class="bg-black/40 text-[9px] uppercase font-black tracking-widest text-slate-500">
+            <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-900/60 border-b border-slate-800">
                         <tr>
-                            <th class="p-4 border-b border-slate-800 w-32">Origin</th>
-                            <th class="p-4 border-b border-slate-800 w-28 text-center">Action</th>
-                            <th class="p-4 border-b border-slate-800">Details</th>
-                            <th class="p-4 border-b border-slate-800 w-40">Timestamp</th>
-                            <th class="p-4 border-b border-slate-800 w-12"></th>
+                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Timestamp</th>
+                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Source</th>
+                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Action</th>
+                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">User</th>
+                            <th class="p-4 text-[10px] font-black uppercase text-slate-500">Details</th>
                         </tr>
                     </thead>
-                    <tbody id="logTableBody" class="mono text-[11px]">
-                        ${allLogs.map((l, idx) => {
-                            const date = new Date(l.timestamp + 'Z'); // Ensure UTC
-                            const dateStr = date.toLocaleDateString('en-US', { 
-                                weekday: 'long',
-                                month: 'long', 
-                                day: 'numeric',
-                                year: 'numeric'
-                            });
-                            const timeStr = date.toLocaleTimeString('en-US', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                                hour12: true
-                            });
-                            
-                            const hasUserInfo = l.user_id && l.user_name;
-                            
-                            return `
-                            <tr class="log-row border-b border-slate-800/40 hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
-                                <td class="p-4 text-slate-500 font-bold uppercase text-[10px]">${l.guild_name || 'System'}</td>
-                                <td class="p-4 text-center">
-                                    <span class="${getActionColor(l.action)} px-3 py-1 rounded font-black uppercase text-[9px] inline-block min-w-[80px]">
-                                        ${l.action}
-                                    </span>
-                                </td>
-                                <td class="p-4 text-slate-300 font-sans">${l.details}</td>
-                                <td class="p-4 text-[10px] text-slate-600">
-                                    <div class="font-bold">${dateStr}</div>
-                                    <div class="text-slate-700 mt-0.5">${timeStr}</div>
-                                </td>
+                    <tbody class="divide-y divide-slate-800/40">
+                        ${logs.map(l => `
+                            <tr class="hover:bg-white/5 transition-colors">
+                                <td class="p-4 text-[10px] text-slate-500 whitespace-nowrap">${l.timestamp}</td>
+                                <td class="p-4"><span class="text-[10px] font-black text-[#FFAA00] uppercase bg-[#FFAA00]/5 px-2 py-1 rounded border border-[#FFAA00]/10">${l.displayName}</span></td>
+                                <td class="p-4"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${l.actionStyle}">${l.action}</span></td>
                                 <td class="p-4">
-                                    ${hasUserInfo ? `
-                                        <button onclick="toggleExpand(${idx})" class="expand-btn text-slate-500 hover:text-[#FFAA00] transition">
-                                            <svg class="w-5 h-5 transition-transform" id="icon-${idx}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                            </svg>
-                                        </button>
-                                    ` : ''}
-                                </td>
-                            </tr>
-                            ${hasUserInfo ? `
-                            <tr class="expanded-row hidden border-b border-slate-800/40" id="expand-${idx}" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
-                                <td colspan="5" class="p-0">
-                                    <div class="bg-black/20 p-6 border-t border-slate-800/30">
-                                        <div class="flex items-start gap-4">
-                                            <img src="${l.user_avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" class="w-12 h-12 rounded-full border-2 border-[#FFAA00]/30">
-                                            <div class="flex-1">
-                                                <div class="flex items-center gap-3 mb-2">
-                                                    <span class="text-sm font-bold text-white">${l.user_name || 'Unknown User'}</span>
-                                                    <span class="text-[9px] text-slate-600 font-mono">ID: ${l.user_id || 'N/A'}</span>
-                                                </div>
-                                                <div class="bg-slate-900/40 rounded-lg p-3 border border-slate-800">
-                                                    <p class="text-[10px] uppercase text-slate-500 font-black mb-1 tracking-wider">Command Executed</p>
-                                                    <code class="text-xs text-[#FFAA00] font-mono">${l.command_used || 'N/A'}</code>
-                                                </div>
-                                            </div>
-                                        </div>
+                                    <div class="flex items-center gap-2">
+                                        <img src="${l.user_avatar}" class="w-5 h-5 rounded-full border border-slate-700">
+                                        <span class="text-xs font-bold text-slate-300">${l.user_name}</span>
                                     </div>
                                 </td>
+                                <td class="p-4 text-xs text-slate-400">${l.details}</td>
                             </tr>
-                            ` : ''}
-                        `}).join('')}
+                        `).join('')}
                     </tbody>
                 </table>
             </div>
         </div>
-        <script>
-            let currentType = 'ALL';
-            let currentServer = 'ALL';
-            const search = document.getElementById('logSearch');
-            const rows = document.querySelectorAll('.log-row');
-
-            function toggleExpand(idx) {
-                const expandRow = document.getElementById('expand-' + idx);
-                const icon = document.getElementById('icon-' + idx);
-                
-                if (expandRow.classList.contains('hidden')) {
-                    expandRow.classList.remove('hidden');
-                    icon.style.transform = 'rotate(180deg)';
-                } else {
-                    expandRow.classList.add('hidden');
-                    icon.style.transform = 'rotate(0deg)';
-                }
-            }
-
-            function applyFilters() {
-                const term = search.value.toLowerCase();
-                const allRows = document.querySelectorAll('.log-row, .expanded-row');
-                
-                allRows.forEach(row => {
-                    if (row.classList.contains('expanded-row')) {
-                        // Handle expanded rows separately - they follow their parent
-                        return;
-                    }
-                    
-                    const typeMatch = currentType === 'ALL' || row.getAttribute('data-action') === currentType;
-                    const serverMatch = currentServer === 'ALL' || row.getAttribute('data-server') === currentServer;
-                    const textMatch = row.innerText.toLowerCase().includes(term);
-                    const shouldShow = typeMatch && serverMatch && textMatch;
-                    
-                    row.style.display = shouldShow ? '' : 'none';
-                    
-                    // Also hide corresponding expanded row if main row is hidden
-                    const rowId = Array.from(document.querySelectorAll('.log-row')).indexOf(row);
-                    const expandedRow = document.getElementById('expand-' + rowId);
-                    if (expandedRow) {
-                        expandedRow.style.display = shouldShow ? '' : 'none';
-                    }
-                });
-            }
-
-            search.addEventListener('keyup', applyFilters);
-
-            function filterType(type, btn) {
-                currentType = type;
-                document.querySelectorAll('.type-btn').forEach(b => {
-                    b.className = "type-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter";
-                });
-                btn.className = "type-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter";
-                applyFilters();
-            }
-
-            function filterServer(srv, btn) {
-                currentServer = srv;
-                document.querySelectorAll('.srv-btn').forEach(b => {
-                    b.className = "srv-btn shrink-0 bg-slate-800 text-slate-400 px-4 py-1.5 rounded-full text-[9px] font-black uppercase hover:text-white tracking-tighter";
-                });
-                btn.className = "srv-btn shrink-0 bg-[#FFAA00] text-black px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-tighter";
-                applyFilters();
-            }
-        </script>
-    </body></html>`);
+    </body>
+    </html>
+    `);
 });
 
 app.get('/invite', (req, res) => {
