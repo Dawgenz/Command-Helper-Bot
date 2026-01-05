@@ -2,17 +2,23 @@ const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = 
 require('dotenv').config();
 
 const commands = [
-    // --- RESOLVED COMMAND ---
+    // RESOLVED COMMAND
     new SlashCommandBuilder()
         .setName('resolved')
-        .setDescription('Marks this thread as resolved and locks it in 30 minutes'),
+        .setDescription('Marks this thread as resolved and locks it after a set time')
+        .addIntegerOption(option =>
+            option.setName('minutes')
+                .setDescription('Minutes until lock (default: 30, max: 1440)')
+                .setRequired(false)
+                .setMinValue(1)
+                .setMaxValue(1440)), // Max 24 hours
     
-    // --- INFO COMMAND ---
+    // INFO COMMAND
     new SlashCommandBuilder()
         .setName('info')
         .setDescription('Display stats about the bot and view active timers, roles, channels, and settings'),
 
-    // --- DUPLICATE COMMAND ---
+    // DUPLICATE COMMAND
     new SlashCommandBuilder()
         .setName('duplicate')
         .setDescription('Marks this thread as a duplicate')
@@ -21,7 +27,7 @@ const commands = [
                 .setDescription('Link to the original post')
                 .setRequired(true)),
 
-    // --- SMART SETUP COMMAND ---
+    // SETUP COMMAND
     new SlashCommandBuilder()
         .setName('setup')
         .setDescription('Configure the bot for this specific server')
