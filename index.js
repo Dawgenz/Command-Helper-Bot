@@ -230,6 +230,19 @@ const getActionColor = (action) => {
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
 
+function getManagedGuilds(userId) {
+    return client.guilds.cache.filter(guild => {
+        const member = guild.members.cache.get(userId);
+        if (!member) return false;
+        
+        const settings = getSettings(guild.id);
+        const isHandler = hasHelperRole(member, settings);
+        const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
+        
+        return isHandler || isAdmin;
+    }).map(guild => guild.id);
+}
+
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
         return res.send(`
@@ -450,23 +463,23 @@ app.get('/logs', async (req, res) => {
     const filterAction = req.query.action;
     const filterGuild = req.query.guild;
 
-    let query = `SELECT * FROM audit_logs`;
-    let params = [];
+    const managedGuildIds = getManagedGuilds(req.user.id);
 
-    // Apply Filters to SQL
-    if (filterAction || filterGuild) {
-        query += " WHERE ";
-        if (filterAction && filterGuild) {
-            query += "action = ? AND guild_id = ?";
-            params.push(filterAction, filterGuild);
-        } else if (filterAction) {
-            query += "action = ?";
-            params.push(filterAction);
-        } else {
-            query += "guild_id = ?";
+    let query = `SELECT * FROM audit_logs WHERE guild_id IN (${managedGuildIds.map(() => '?').join(',')})`;
+    let params = [...managedGuildIds];
+
+    if (filterAction) {
+        query += " AND action = ?";
+        params.push(filterAction);
+    }
+    
+    if (filterGuild) {
+        if (managedGuildIds.includes(filterGuild)) {
+            query += " AND guild_id = ?";
             params.push(filterGuild);
         }
     }
+
     query += " ORDER BY timestamp DESC LIMIT 100";
 
     const rawLogs = db.prepare(query).all(...params);
