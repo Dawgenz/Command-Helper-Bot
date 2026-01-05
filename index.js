@@ -388,12 +388,24 @@ app.get('/', async (req, res) => {
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
     
+    const allowedGuildIds = db.prepare(`SELECT guild_id FROM guild_settings`).all()
+        .map(g => g.guild_id)
+        .filter(gid => {
+            const guild = client.guilds.cache.get(gid);
+            if (!guild) return false;
+            const member = guild.members.cache.get(req.user.id);
+            return member && (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, getSettings(gid)));
+    });
+
+    if (allowedGuildIds.length === 0) {
+        return res.send(`<html>${getHead('Logs')} <body class="bg-[#0b0f1a] text-white p-8">${getNav('logs')} <p>No logs available.</p></body></html>`);
+    }
+
     const allLogs = db.prepare(`
-        SELECT audit_logs.*, guild_settings.guild_name 
-        FROM audit_logs 
-        LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
+        SELECT * FROM audit_logs 
+        WHERE guild_id IN (${allowedGuildIds.map(() => '?').join(',')}) 
         ORDER BY timestamp DESC LIMIT 100
-    `).all();
+    `).all(...allowedGuildIds);
     
     const uniqueServers = [...new Set(allLogs.map(l => l.guild_name).filter(Boolean))];
 
@@ -945,49 +957,92 @@ app.get('/snippets/new', (req, res) => {
     `);
 });
 
-app.post('/snippets/new', express.urlencoded({ extended: true }), (req, res) => {
-    const { guild_id, name, title, description, color, footer, fields, url, image_url, thumbnail_url } = req.body;
+app.post('/snippets/new', express.urlencoded({ extended: true }), async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
-    db.prepare(`
-        INSERT INTO snippets (
-            guild_id, name, title, description, color, fields, footer, url, image_url, thumbnail_url, created_by
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        guild_id,
-        name.toLowerCase(),
-        title,
-        description,
-        color,
-        fields || '[]',
-        footer,
-        url,
-        image_url,
-        thumbnail_url,
-        req.user.id
-    );
+    const { guild_id, name, title, description, color, footer, url, image_url, thumbnail_url } = req.body;
 
-    logAction(
-        guild_id,
-        'SNIPPET_CREATE',
-        `Created snippet: ${name}`,
-        req.user.id,
-        req.user.username,
-        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-        '/snippet'
-    );
+    try {
+        // --- SECURITY VALIDATION ---
+        const guild = client.guilds.cache.get(guild_id);
+        if (!guild) return res.status(403).send("Forbidden: Bot is not in this server.");
 
-    res.redirect('/snippets');
+        const member = await guild.members.fetch(req.user.id).catch(() => null);
+        if (!member) return res.status(403).send("Forbidden: You are not in this server.");
+
+        const isAuthorized = member.permissions.has(PermissionFlagsBits.Administrator) || 
+                           hasHelperRole(member, getSettings(guild_id));
+
+        if (!isAuthorized) {
+            return res.status(403).send("Security Alert: Unauthorized snippet creation attempt.");
+        }
+
+        // --- DUPLICATE CHECK ---
+        const existing = db.prepare(`SELECT id FROM snippets WHERE guild_id = ? AND name = ?`).get(guild_id, name.toLowerCase());
+        if (existing) {
+            return res.send(`<html>${getHead('Error')}<body class="bg-[#0b0f1a] text-white p-8">
+                <h1 class="text-xl font-bold">Duplicate Trigger Name!</h1>
+                <p>A snippet named "${name}" already exists for this server.</p>
+                <button onclick="window.history.back()" class="mt-4 bg-white text-black px-4 py-2 rounded">Go Back</button>
+            </body></html>`);
+        }
+
+        // --- DATABASE INSERT ---
+        db.prepare(`
+            INSERT INTO snippets (
+                guild_id, name, title, description, color, footer, url, image_url, thumbnail_url, created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            guild_id,
+            name.toLowerCase(),
+            title,
+            description,
+            color,
+            footer,
+            url,
+            image_url,
+            thumbnail_url,
+            req.user.id
+        );
+
+        logAction(
+            guild_id, 
+            'SNIPPET_CREATE', 
+            `Created snippet: ${name}`, 
+            req.user.id, 
+            req.user.username, 
+            `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
+            '/snippet'
+        );
+
+        res.redirect('/snippets');
+
+    } catch (err) {
+        console.error("Critical Post Error:", err);
+        res.status(500).send("Internal Server Error");
+    }
 });
 
-app.get('/snippets/edit/:id', (req, res) => {
+app.get('/snippets/edit/:id', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
     if (!snippet) return res.redirect('/snippets');
 
-    if (!canManageSnippet(req, snippet)) { 
-        return res.status(403).send("Forbidden");
+    let guild = client.guilds.cache.get(snippet.guild_id);
+    if (!guild) {
+        try {
+            guild = await client.guilds.fetch(snippet.guild_id);
+        } catch (e) {
+            return res.status(403).send("Forbidden: Guild not found.");
+        }
+    }
+
+    const member = await guild.members.fetch(req.user.id).catch(() => null);
+    
+    if (!member || !(member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, getSettings(snippet.guild_id)))) {
+        return res.status(403).send("Forbidden: You do not have permission.");
     }
 
     res.send(`
@@ -1430,18 +1485,30 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        const embed = new EmbedBuilder()
-            .setTitle(snippet.title || null)
-            .setURL(snippet.url || null)
-            .setDescription(snippet.description || null)
-            .setImage(snippet.image_url || null)
-            .setThumbnail(snippet.thumbnail_url || null)
-            .setColor(snippet.color || IMPULSE_COLOR)
-            .setTimestamp();
+// Inside your snippet interaction handler
+try {
+    const embed = new EmbedBuilder()
+        .setTitle(parseVars(snippet.title))
+        .setURL(snippet.url || null)
+        .setDescription(parseVars(snippet.description))
+        .setColor(snippet.color || IMPULSE_COLOR)
+        .setTimestamp();
 
-        if (snippet.footer) {
-            embed.setFooter({ text: snippet.footer });
+        // Check if URLs are actually valid strings before setting them
+        if (snippet.image_url && snippet.image_url.startsWith('http')) {
+            embed.setImage(snippet.image_url);
         }
+        if (snippet.thumbnail_url && snippet.thumbnail_url.startsWith('http')) {
+            embed.setThumbnail(snippet.thumbnail_url);
+        }
+        if (snippet.footer) {
+            embed.setFooter({ text: parseVars(snippet.footer) });
+        }
+
+      } catch (error) {
+        console.error("Embed Error:", error);
+        return interaction.reply({ content: "❌ Failed to send snippet. Check if your Image URLs are valid.", ephemeral: true });
+      }
 
         try {
                 const fields = JSON.parse(snippet.fields || '[]');
