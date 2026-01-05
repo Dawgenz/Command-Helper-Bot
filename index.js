@@ -765,36 +765,22 @@ app.get('/snippets/new', (req, res) => {
 
             <h1 class="text-2xl font-black text-white mb-6 uppercase">Create Snippet</h1>
 
-            <form method="POST" action="/snippets/new" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-              <select name="guild_id" required class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
-                <option value="">Select Server</option>
-                ${guilds.map(g => `
-                    <option value="${g.guild_id}">${g.guild_name}</option>
-                `).join('')}
-              </select>
-
+            <form method="POST" action="/snippets/new" class="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div class="space-y-4">
-                    <input name="name" placeholder="snippet_name" required class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
-                    <input name="title" placeholder="Embed title" class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
-                    <textarea name="description" placeholder="Embed description" class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm h-32"></textarea>
-                    <input name="color" type="color" value="#FFAA00" class="w-24 h-10">
-                    <input name="footer" placeholder="Footer text" class="w-full bg-slate-900 p-3 rounded border border-slate-700 text-sm">
-                    <input type="hidden" name="fields" id="fieldsInput">
-                    <button class="bg-[#FFAA00] text-black px-6 py-3 rounded-xl font-black uppercase text-xs">
-                        Save Snippet
-                    </button>
-                </div>
-
-                <div>
-                    <p class="text-xs uppercase font-black text-slate-500 mb-2">Preview</p>
-                    <div id="preview" class="bg-[#2b2d31] p-4 rounded-lg border-l-4" style="border-color:#FFAA00">
-                        <h3 id="pTitle" class="font-bold text-white"></h3>
-                        <p id="pDesc" class="text-sm text-slate-300 mt-1"></p>
-                        <div id="pFields" class="grid grid-cols-1 gap-2 mt-3"></div>
-                        <p id="pFooter" class="text-xs text-slate-400 mt-4"></p>
+                    <div>
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Target Server</label>
+                        <select name="guild_id" required class="w-full bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none appearance-none cursor-pointer">
+                            <option value="" disabled selected>Select an Authorized Server...</option>
+                            ${guilds.map(g => `<option value="${g.guild_id}">${g.guild_name}</option>`).join('')}
+                        </select>
                     </div>
-                </div>
+
+                    <div>
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Command Name</label>
+                        <input name="name" placeholder="e.g. rules" required class="w-full bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-sm focus:border-[#FFAA00] outline-none">
+                    </div>
+                    
+                    </div>
             </form>
         </div>
 
@@ -867,7 +853,7 @@ app.get('/snippets/edit/:id', (req, res) => {
     if (!snippet) return res.redirect('/snippets');
 
     if (!canManageSnippet(req, snippet)) { 
-        return res.status(403).send("Forbidden: You do not have permission to edit this snippet.");
+        return res.status(403).send("Forbidden");
     }
 
     res.send(`
@@ -879,11 +865,14 @@ app.get('/snippets/edit/:id', (req, res) => {
                 <h1 class="text-2xl font-black text-white mb-6 uppercase">Edit Snippet</h1>
 
                 <form method="POST" action="/snippets/edit/${snippet.id}">
-                    <input name="title" value="${snippet.title || ''}" class="w-full bg-slate-900 p-3 mb-3 rounded">
-                    <textarea name="description" class="w-full bg-slate-900 p-3 mb-3 rounded">${snippet.description || ''}</textarea>
-                    <input name="color" type="color" value="${snippet.color || '#FFAA00'}">
-                    <input name="footer" value="${snippet.footer || ''}" class="w-full bg-slate-900 p-3 mt-3 rounded">
-                    <button class="bg-[#FFAA00] text-black px-6 py-3 mt-4 rounded-xl font-black uppercase text-xs">
+                    <input name="title" value="${snippet.title || ''}" class="w-full bg-slate-900 p-3 mb-3 rounded border border-slate-800 text-sm focus:border-[#FFAA00] outline-none">
+                    <textarea name="description" class="w-full bg-slate-900 p-3 mb-3 rounded border border-slate-800 text-sm h-32 focus:border-[#FFAA00] outline-none">${snippet.description || ''}</textarea>
+                    <div class="flex items-center gap-4 mb-4">
+                        <label class="text-[10px] font-black uppercase text-slate-500">Embed Color</label>
+                        <input name="color" type="color" value="${snippet.color || '#FFAA00'}" class="bg-transparent border-none w-10 h-10 cursor-pointer">
+                    </div>
+                    <input name="footer" value="${snippet.footer || ''}" class="w-full bg-slate-900 p-3 rounded border border-slate-800 text-sm focus:border-[#FFAA00] outline-none">
+                    <button class="bg-[#FFAA00] text-black px-6 py-3 mt-6 rounded-xl font-black uppercase text-xs hover:bg-[#ffbb33] transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)]">
                         Update Snippet
                     </button>
                 </form>
@@ -907,10 +896,13 @@ app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), (req, res
 
 app.get('/snippets/delete/:id', (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    if (!canManageSnippet(req, snippet)) { return res.status(403).send("Forbidden");}
 
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
     if (!snippet) return res.redirect('/snippets');
+
+    if (!canManageSnippet(req, snippet)) { 
+        return res.status(403).send("Forbidden");
+    }
 
     db.prepare(`DELETE FROM snippets WHERE id = ?`).run(req.params.id);
 
