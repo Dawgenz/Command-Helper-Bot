@@ -426,6 +426,8 @@ app.get('/logs', async (req, res) => {
 app.listen(3000, '0.0.0.0');
 
 // --- BOT EVENTS ---
+const IMPULSE_COLOR = 0xFFAA00;
+
 client.once('clientReady', (c) => {
     console.log(`✅ Logged in as ${c.user.tag}`);
     setInterval(async () => {
@@ -438,7 +440,15 @@ client.once('clientReady', (c) => {
                 if (thread) {
                     await thread.setAppliedTags([settings.resolved_tag]);
                     await thread.setLocked(true);
-                    await thread.send("🔒 **Post Locked.** This thread is now closed.");
+                    
+                    const lockEmbed = new EmbedBuilder()
+                        .setTitle("🔒 Thread Locked")
+                        .setDescription("This thread has been marked as resolved and is now closed. Thank you for using our support forum!")
+                        .setColor(IMPULSE_COLOR)
+                        .setTimestamp()
+                        .setFooter({ text: "Impulse Bot • Automated Lock" });
+                    
+                    await thread.send({ embeds: [lockEmbed] });
                     logAction(row.guild_id, 'LOCK', `Locked thread: ${thread.name}`);
                 }
             } catch (e) { console.error("Lock error:", e); }
@@ -451,10 +461,21 @@ client.on('threadCreate', async (thread) => {
     const settings = getSettings(thread.guildId);
     if (!settings || thread.parentId !== settings.forum_id) return;
 
-    await thread.send({
-        content: `Welcome <@${thread.ownerId}>!`,
-        embeds: [new EmbedBuilder().setTitle("Help Guidelines").setDescription("A helper will be with you soon. Use **/resolved** when done.").setColor(0x5865F2)]
-    });
+    const welcomeEmbed = new EmbedBuilder()
+        .setTitle("Welcome to Support!")
+        .setDescription(
+            `Hey <@${thread.ownerId}>!\n\n` +
+            `**What happens next?**\n` +
+            `• A command helper will assist you shortly\n` +
+            `• Use \`/resolved\` when your issue is fixed\n` +
+            `• The thread will auto-lock 30 minutes after being marked resolved\n\n` +
+            `*Please provide as much detail as possible about your issue!*`
+        )
+        .setColor(IMPULSE_COLOR)
+        .setTimestamp()
+        .setFooter({ text: "Impulse Bot • Automated Greeting" });
+
+    await thread.send({ embeds: [welcomeEmbed] });
     logAction(thread.guildId, 'GREET', `Welcomed user in ${thread.name}`);
 });
 
@@ -463,79 +484,140 @@ client.on('interactionCreate', async (interaction) => {
     const settings = getSettings(interaction.guildId);
 
     if (interaction.commandName === 'setup') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply("Admins only.");
-            
-            const forum = interaction.options.getChannel('forum');
-            const resTag = interaction.options.getString('resolved_tag');
-            const dupTag = interaction.options.getString('duplicate_tag');
-            
-            // CLEANING LOGIC: This removes all spaces and ensures it's just IDs and commas
-            const rawRoles = interaction.options.getString('helper_roles');
-            const cleanRoles = rawRoles.replace(/\s+/g, ''); 
-
-            db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(
-                interaction.guildId, 
-                interaction.guild.name, 
-                forum.id, 
-                resTag, 
-                dupTag, 
-                cleanRoles
-            );
-
-            logAction(interaction.guildId, 'SETUP', `Setup updated with Roles: ${cleanRoles}`);
-            
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return interaction.reply({ 
-                content: `✅ **Setup Complete!**\nMonitoring: <#${forum.id}>\nHelpers: ${cleanRoles.split(',').map(id => `<@&${id}>`).join(' ')}`, 
+                content: "❌ **Access Denied:** Administrator permissions required.", 
                 ephemeral: true 
             });
+        }
+        
+        const forum = interaction.options.getChannel('forum');
+        const resTag = interaction.options.getString('resolved_tag');
+        const dupTag = interaction.options.getString('duplicate_tag');
+        const rawRoles = interaction.options.getString('helper_roles');
+        const cleanRoles = rawRoles.replace(/\s+/g, ''); 
+
+        db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?)`).run(
+            interaction.guildId, 
+            interaction.guild.name, 
+            forum.id, 
+            resTag, 
+            dupTag, 
+            cleanRoles
+        );
+
+        logAction(interaction.guildId, 'SETUP', `Setup updated with Roles: ${cleanRoles}`);
+        
+        const setupEmbed = new EmbedBuilder()
+            .setTitle("✅ Setup Complete!")
+            .addFields(
+                { name: "Forum Channel", value: `<#${forum.id}>`, inline: true },
+                { name: "Helper Roles", value: cleanRoles.split(',').map(id => `<@&${id}>`).join(' '), inline: true },
+                { name: "Tags Configured", value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\``, inline: false }
+            )
+            .setColor(IMPULSE_COLOR)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot" });
+        
+        return interaction.reply({ embeds: [setupEmbed], ephemeral: true });
     }
 
     if (interaction.commandName === 'info') {
-        if (!settings) return interaction.reply("❌ This server is not set up.");
-        const embed = new EmbedBuilder().setTitle("Bot Configuration Status").addFields({ name: "Forum Channel", value: `<#${settings.forum_id}>`, inline: true }, { name: "Helper Roles", value: settings.helper_role_id.split(',').map(id => `<@&${id}>`).join(', '), inline: true }, { name: "Active Timers", value: db.prepare('SELECT COUNT(*) as count FROM pending_locks WHERE guild_id = ?').get(interaction.guildId).count.toString(), inline: true }).setColor(0x38BDF8);
-        return interaction.reply({ embeds: [embed] });
+        if (!settings) {
+            return interaction.reply({ 
+                content: "❌ This server hasn't been configured yet. Use `/setup` first.", 
+                ephemeral: true 
+            });
+        }
+        
+        const timerCount = db.prepare('SELECT COUNT(*) as count FROM pending_locks WHERE guild_id = ?').get(interaction.guildId).count;
+        
+        const infoEmbed = new EmbedBuilder()
+            .setTitle("Bot Configuration Status")
+            .addFields(
+                { name: "Forum Channel", value: `<#${settings.forum_id}>`, inline: true },
+                { name: "Helper Roles", value: settings.helper_role_id.split(',').map(id => `<@&${id}>`).join(', '), inline: true },
+                { name: "Active Timers", value: timerCount.toString(), inline: true },
+                { name: "Resolved Tag", value: `\`${settings.resolved_tag}\``, inline: true },
+                { name: "Duplicate Tag", value: `\`${settings.duplicate_tag}\``, inline: true }
+            )
+            .setColor(IMPULSE_COLOR)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot" });
+        
+        return interaction.reply({ embeds: [infoEmbed] });
     }
 
-    if (!settings) return interaction.reply({ content: "Please run \`/setup\` first.", ephemeral: true });
+    if (!settings) {
+        return interaction.reply({ 
+            content: "❌ Please run `/setup` first.", 
+            ephemeral: true 
+        });
+    }
 
     if (interaction.commandName === 'resolved') {
-        const lockTime = Date.now() + (30 * 60 * 1000);
-        db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(interaction.channelId, interaction.guildId, lockTime);
-        logAction(interaction.guildId, 'RESOLVED', `Marked thread for locking: ${interaction.channel.name}`);
-        await interaction.reply("✅ Thread marked as **Resolved**. Locking in 30 minutes.");
+        const customMinutes = interaction.options.getInteger('minutes') || 30;
+        const lockTime = Date.now() + (customMinutes * 60 * 1000);
+        
+        db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(
+            interaction.channelId, 
+            interaction.guildId, 
+            lockTime
+        );
+        
+        logAction(interaction.guildId, 'RESOLVED', `Marked thread for locking in ${customMinutes}m: ${interaction.channel.name}`);
+        
+        const resolvedEmbed = new EmbedBuilder()
+            .setTitle("✅ Thread Marked as Resolved")
+            .setDescription(
+                `This thread will automatically lock in **${customMinutes} minutes**.\n\n` +
+                `If you need to reopen this thread or have additional questions, please contact a moderator before it locks.`
+            )
+            .setColor(0x10B981) // Emerald green
+            .setTimestamp(lockTime)
+            .setFooter({ text: `Locks at` });
+        
+        await interaction.reply({ embeds: [resolvedEmbed] });
     }
 
-  if (interaction.commandName === 'duplicate') {
-          // Check if user is Admin OR has the Helper Role
-          const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-          const isHelper = hasHelperRole(interaction.member, settings);
+    if (interaction.commandName === 'duplicate') {
+        const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+        const isHelper = hasHelperRole(interaction.member, settings);
 
-          if (!isAdmin && !isHelper) {
-              return interaction.reply({ 
-                  content: "❌ Access Denied. You need a **Helper Role** or **Administrator** permissions.", 
-                  ephemeral: true 
-              });
-          }
+        if (!isAdmin && !isHelper) {
+            return interaction.reply({ 
+                content: "❌ **Access Denied:** You need a Command Helper Role or Administrator permissions.", 
+                ephemeral: true 
+            });
+        }
 
-          const link = interaction.options.getString('link');
-          
-          try {
-              // Apply duplicate tag and lock
-              await interaction.channel.setAppliedTags([settings.duplicate_tag]);
-              await interaction.reply({ 
-                  embeds: [new EmbedBuilder()
-                      .setTitle("Thread Closed: Duplicate")
-                      .setDescription(`This topic has already been addressed here: ${link}`)
-                      .setColor(0xFFA500)
-                      .setTimestamp()] 
-              });
-              
-              await interaction.channel.setLocked(true);
-              logAction(interaction.guildId, 'DUPLICATE', `Closed duplicate: ${interaction.channel.name}`);
-          } catch (e) {
-              console.error(e);
-              interaction.followUp({ content: "Failed to apply tags/lock. Check bot permissions.", ephemeral: true });
-          }
+        const link = interaction.options.getString('link');
+        
+        try {
+            await interaction.channel.setAppliedTags([settings.duplicate_tag]);
+            
+            const duplicateEmbed = new EmbedBuilder()
+                .setTitle("🔄 Thread Closed: Duplicate")
+                .setDescription(
+                    `This topic has already been addressed in another thread.\n\n` +
+                    `**Original Thread:** ${link}\n\n` +
+                    `Please refer to the linked thread for the solution. This thread will now be locked.`
+                )
+                .setColor(0x0EA5E9) // Sky blue
+                .setTimestamp()
+                .setFooter({ text: "Impulse Bot • Duplicate Detection" });
+            
+            await interaction.reply({ embeds: [duplicateEmbed] });
+            await interaction.channel.setLocked(true);
+            
+            logAction(interaction.guildId, 'DUPLICATE', `Closed duplicate: ${interaction.channel.name}`);
+        } catch (e) {
+            console.error(e);
+            interaction.followUp({ 
+                content: "⚠️ Failed to apply tags/lock. Check bot permissions.", 
+                ephemeral: true 
+            });
+        }
     }
 });
 
