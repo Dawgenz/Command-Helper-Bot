@@ -101,7 +101,6 @@ const getActionColor = (action) => {
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
 
-// MAIN DASHBOARD
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
         return res.send(`
@@ -211,24 +210,62 @@ app.get('/', async (req, res) => {
                     <a href="/logs" class="text-[#FFAA00] text-[9px] font-black tracking-widest hover:bg-[#FFAA00] hover:text-black transition px-4 py-2 rounded-lg border border-[#FFAA00]/20 uppercase">Audit Log</a>
                 </div>
                 <div class="divide-y divide-slate-800/40">
-                    ${logs.map(l => `
+                    ${logs.map(l => {
+                        const date = new Date(l.timestamp);
+                        const timeStr = date.toLocaleTimeString('en-US', { 
+                            month: '2-digit', 
+                            day: '2-digit', 
+                            hour: '2-digit', 
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false 
+                        }).replace(',', '');
+                        return `
                         <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
-                            <div class="hidden md:block text-[10px] mono text-slate-600 w-16 text-right shrink-0">
-                                ${new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            <div class="hidden md:block text-[10px] mono text-slate-600 w-20 text-right shrink-0">
+                                ${timeStr}
                             </div>
-                            <div class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} shrink-0">
-                                ${l.action}
+                            <div class="w-20 flex items-center justify-center shrink-0">
+                                <span class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} inline-block text-center min-w-[70px]">
+                                    ${l.action}
+                                </span>
                             </div>
                             <div class="flex-1 min-w-0">
                                 <p class="text-xs text-slate-300 truncate font-medium">${l.details}</p>
                             </div>
-                            <div class="text-[9px] font-black text-slate-600 uppercase tracking-widest shrink-0">
+                            <div class="text-[9px] font-black text-slate-600 uppercase tracking-widest shrink-0 w-24 text-right">
                                 ${l.guild_name || 'System'}
                             </div>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                 </div>
             </div>
+
+            <!-- INFO FOOTER -->
+            <footer class="mt-12 pt-8 border-t border-slate-800/50">
+                <div class="max-w-3xl mx-auto text-center space-y-4">
+                    <div class="flex items-center justify-center gap-3 mb-4">
+                        <img src="${botAvatar}" class="w-8 h-8 rounded-full border border-[#FFAA00]/30">
+                        <h3 class="text-sm font-black text-[#FFAA00] uppercase tracking-widest">Impulse Dashboard</h3>
+                    </div>
+                    
+                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-6 backdrop-blur-sm">
+                        <p class="text-xs text-slate-400 leading-relaxed mb-3">
+                            <span class="text-[#FFAA00] font-bold">Privacy Notice:</span> This dashboard does not store, collect, or use any personal user data. 
+                            It only accesses Discord OAuth2 to verify your server membership and display relevant information from servers where the bot is installed.
+                        </p>
+                        <p class="text-[10px] text-slate-500 italic">
+                            All data is pulled in real-time and nothing is cached or saved beyond your active session.
+                        </p>
+                    </div>
+
+                    <div class="flex items-center justify-center gap-6 text-[9px] text-slate-600 uppercase tracking-wider font-bold">
+                        <span>Built for Command Block Community</span>
+                        <span class="text-slate-800">•</span>
+                        <span>Powered by Discord.js</span>
+                    </div>
+                </div>
+            </footer>
         </div>
         <script>
             function updateTimers() {
@@ -249,7 +286,6 @@ app.get('/', async (req, res) => {
     </body></html>`);
 });
 
-// LOGS PAGE WITH RESPONSIVE TABLE :D
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
     
@@ -272,7 +308,12 @@ app.get('/logs', async (req, res) => {
                     <a href="/" class="text-[#FFAA00] text-[9px] font-black tracking-[0.2em] hover:underline uppercase">← Terminal Hub</a>
                     <h1 class="text-3xl md:text-4xl font-black text-white mt-1 leading-none uppercase italic">Data Archive</h1>
                 </div>
-                <input type="text" id="logSearch" placeholder="Search archive..." class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition w-full md:w-64">
+                <div class="relative w-full md:w-64">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    <input type="text" id="logSearch" placeholder="Search archive..." class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-[#FFAA00] transition">
+                </div>
             </div>
 
             <div class="space-y-6 mb-8">
@@ -303,27 +344,42 @@ app.get('/logs', async (req, res) => {
                 <table class="w-full text-left border-collapse">
                     <thead class="bg-black/40 text-[9px] uppercase font-black tracking-widest text-slate-500">
                         <tr>
-                            <th class="p-4 border-b border-slate-800">Origin</th>
-                            <th class="p-4 border-b border-slate-800">Action</th>
+                            <th class="p-4 border-b border-slate-800 w-32">Origin</th>
+                            <th class="p-4 border-b border-slate-800 w-28 text-center">Action</th>
                             <th class="p-4 border-b border-slate-800">Details</th>
-                            <th class="p-4 border-b border-slate-800">Time</th>
+                            <th class="p-4 border-b border-slate-800 w-40">Timestamp</th>
                         </tr>
                     </thead>
                     <tbody id="logTableBody" class="divide-y divide-slate-800/40 mono text-[11px]">
-                        ${allLogs.map(l => `
-                            <tr class="log-row hover:bg-[#FFAA00]/5 transition" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
+                        ${allLogs.map(l => {
+                            const date = new Date(l.timestamp);
+                            const dateStr = date.toLocaleDateString('en-US', { 
+                                weekday: 'long',
+                                month: 'long', 
+                                day: 'numeric',
+                                year: 'numeric'
+                            });
+                            const timeStr = date.toLocaleTimeString('en-US', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                hour12: true
+                            });
+                            return `
+                            <tr class="log-row hover:bg-[#FFAA00]/5 transition cursor-pointer" data-action="${l.action}" data-server="${l.guild_name || 'System'}">
                                 <td class="p-4 text-slate-500 font-bold uppercase text-[10px]">${l.guild_name || 'System'}</td>
-                                <td class="p-4">
-                                    <span class="${getActionColor(l.action)} px-2 py-0.5 rounded font-black uppercase text-[9px]">
+                                <td class="p-4 text-center">
+                                    <span class="${getActionColor(l.action)} px-3 py-1 rounded font-black uppercase text-[9px] inline-block min-w-[80px]">
                                         ${l.action}
                                     </span>
                                 </td>
                                 <td class="p-4 text-slate-300 font-sans">${l.details}</td>
                                 <td class="p-4 text-[10px] text-slate-600">
-                                    ${new Date(l.timestamp).toLocaleDateString([], {month:'short', day:'numeric'})}
+                                    <div class="font-bold">${dateStr}</div>
+                                    <div class="text-slate-700 mt-0.5">${timeStr}</div>
                                 </td>
                             </tr>
-                        `).join('')}
+                        `}).join('')}
                     </tbody>
                 </table>
             </div>
