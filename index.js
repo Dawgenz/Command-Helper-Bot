@@ -745,70 +745,76 @@ app.get('/snippets', async (req, res) => {
 app.get('/snippets/new', (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
-    const guilds = db.prepare(`SELECT * FROM guild_settings`).all().filter(g => {
-    const guild = client.guilds.cache.get(g.guild_id);
-    if (!guild) return false;
-    const member = guild.members.cache.get(req.user.id);
-    return member && (
-        member.permissions.has(PermissionFlagsBits.Administrator) ||
-        hasHelperRole(member, g)
-    );
-});
-
+    const guilds = db.prepare(`SELECT guild_id, guild_name FROM guild_settings`).all()
+        .filter(g => {
+            const guild = client.guilds.cache.get(g.guild_id);
+            if (!guild) return false;
+            const member = guild.members.cache.get(req.user.id);
+            return member && (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, getSettings(g.guild_id)));
+        });
 
     res.send(`
     <html>
-    ${getHead('Create Snippet')}
+    ${getHead('Impulse | Create Snippet')}
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-4xl mx-auto">
             ${getNav('snippets')}
+            
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Create <span class="text-[#FFAA00]">Snippet</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest mt-1">Add a new automated response embed</p>
+            </div>
 
-            <h1 class="text-2xl font-black text-white mb-6 uppercase">Create Snippet</h1>
-
-            <form method="POST" action="/snippets/new" class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div class="space-y-4">
-                    <div>
+            <form method="POST" action="/snippets/new" class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
                         <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Target Server</label>
-                        <select name="guild_id" required class="w-full bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none appearance-none cursor-pointer">
-                            <option value="" disabled selected>Select an Authorized Server...</option>
+                        <select name="guild_id" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none appearance-none cursor-pointer">
+                            <option value="" disabled selected>Choose a server...</option>
                             ${guilds.map(g => `<option value="${g.guild_id}">${g.guild_name}</option>`).join('')}
                         </select>
                     </div>
 
+                    <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Trigger Name (e.g. "rules")</label>
+                        <input name="name" required placeholder="Command trigger..." class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none">
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
                     <div>
-                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Command Name</label>
-                        <input name="name" placeholder="e.g. rules" required class="w-full bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-sm focus:border-[#FFAA00] outline-none">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Embed Title</label>
+                        <input name="title" placeholder="Main header of the embed..." class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
                     </div>
-                    
+
+                    <div>
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Embed Description</label>
+                        <textarea name="description" placeholder="The main message body..." class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32 focus:border-[#FFAA00] outline-none resize-none"></textarea>
                     </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800 md:col-span-2">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Footer Text</label>
+                        <input name="footer" placeholder="Text at the bottom..." class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                    </div>
+
+                    <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Accent Color</label>
+                        <div class="flex items-center gap-3 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
+                            <input name="color" type="color" value="#FFAA00" class="bg-transparent border-none w-8 h-8 cursor-pointer">
+                            <span class="text-[10px] font-mono text-slate-400">HEX PICKER</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end pt-4">
+                    <button type="submit" class="bg-[#FFAA00] hover:bg-[#FFC040] text-black px-8 py-3 rounded-xl font-black uppercase text-xs tracking-widest transition-all shadow-[0_0_20px_rgba(255,170,0,0.2)]">
+                        Save Snippet
+                    </button>
+                </div>
             </form>
         </div>
-
-        <script>
-            const nameInput = document.querySelector('input[name="name"]');
-            const titleInput = document.querySelector('input[name="title"]');
-            const descInput = document.querySelector('textarea[name="description"]');
-            const footerInput = document.querySelector('input[name="footer"]');
-            const colorInput = document.querySelector('input[name="color"]');
-
-            const pTitle = document.getElementById('pTitle');
-            const pDesc = document.getElementById('pDesc');
-            const pFooter = document.getElementById('pFooter');
-            const preview = document.getElementById('preview');
-
-            function updatePreview() {
-                pTitle.innerText = titleInput.value || '';
-                pDesc.innerText = descInput.value || '';
-                pFooter.innerText = footerInput.value || '';
-                preview.style.borderColor = colorInput.value;
-            }
-
-            [titleInput, descInput, footerInput, colorInput].forEach(el =>
-                el.addEventListener('input', updatePreview)
-            );
-
-            updatePreview();
-        </script>
     </body>
     </html>
     `);
