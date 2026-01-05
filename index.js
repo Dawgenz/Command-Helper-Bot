@@ -144,17 +144,17 @@ const getHead = (title) => `
     </head>
 `;
 
-function canManageSnippet(req, snippet) {
-    const guild = client.guilds.cache.get(snippet.guild_id);
-    if (!guild) return false;
-
-    const member = guild.members.cache.get(req.user.id);
-    if (!member) return false;
-
-    return (
-        member.permissions.has(PermissionFlagsBits.Administrator) ||
-        hasHelperRole(member, getSettings(snippet.guild_id))
-    );
+async function canManageSnippet(req, guild_id) {
+    try {
+        let guild = client.guilds.cache.get(guild_id);
+        if (!guild) guild = await client.guilds.fetch(guild_id);
+        
+        const member = await guild.members.fetch(req.user.id);
+        const settings = getSettings(guild_id);
+        return member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings);
+    } catch (e) {
+        return false;
+    }
 }
 
 const getActionColor = (action) => {
@@ -1030,44 +1030,53 @@ app.get('/snippets/edit/:id', async (req, res) => {
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
     if (!snippet) return res.redirect('/snippets');
 
-    let guild = client.guilds.cache.get(snippet.guild_id);
-    if (!guild) {
-        try {
-            guild = await client.guilds.fetch(snippet.guild_id);
-        } catch (e) {
-            return res.status(403).send("Forbidden: Guild not found.");
-        }
-    }
-
-    const member = await guild.members.fetch(req.user.id).catch(() => null);
-    
-    if (!member || !(member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, getSettings(snippet.guild_id)))) {
-        return res.status(403).send("Forbidden: You do not have permission.");
+    if (!(await canManageSnippet(req, snippet.guild_id))) {
+        return res.status(403).send("Forbidden");
     }
 
     res.send(`
-        <html>
-        ${getHead('Edit Snippet')}
-        <body class="bg-[#0b0f1a] text-slate-200 p-6">
-            <div class="max-w-4xl mx-auto">
-                ${getNav('snippets')}
-                <h1 class="text-2xl font-black text-white mb-6 uppercase">Edit Snippet</h1>
-
-                <form method="POST" action="/snippets/edit/${snippet.id}">
-                    <input name="title" value="${snippet.title || ''}" class="w-full bg-slate-900 p-3 mb-3 rounded border border-slate-800 text-sm focus:border-[#FFAA00] outline-none">
-                    <textarea name="description" class="w-full bg-slate-900 p-3 mb-3 rounded border border-slate-800 text-sm h-32 focus:border-[#FFAA00] outline-none">${snippet.description || ''}</textarea>
-                    <div class="flex items-center gap-4 mb-4">
-                        <label class="text-[10px] font-black uppercase text-slate-500">Embed Color</label>
-                        <input name="color" type="color" value="${snippet.color || '#FFAA00'}" class="bg-transparent border-none w-10 h-10 cursor-pointer">
-                    </div>
-                    <input name="footer" value="${snippet.footer || ''}" class="w-full bg-slate-900 p-3 rounded border border-slate-800 text-sm focus:border-[#FFAA00] outline-none">
-                    <button class="bg-[#FFAA00] text-black px-6 py-3 mt-6 rounded-xl font-black uppercase text-xs hover:bg-[#ffbb33] transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)]">
-                        Update Snippet
-                    </button>
-                </form>
+    <html>
+    ${getHead('Impulse | Edit Snippet')}
+    <body class="bg-[#0b0f1a] text-slate-200 p-6">
+        <div class="max-w-6xl mx-auto">
+            ${getNav('snippets')}
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Edit <span class="text-[#FFAA00]">Snippet</span></h1>
+                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying: ${snippet.name}</p>
             </div>
-        </body>
-        </html>
+
+            <form method="POST" action="/snippets/edit/${snippet.id}" class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div class="space-y-6">
+                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
+                        <input name="title" value="${snippet.title || ''}" placeholder="Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
+                        <input name="url" value="${snippet.url || ''}" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
+                    </div>
+                    
+                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800">
+                        <textarea name="description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 outline-none resize-none">${snippet.description || ''}</textarea>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                            <label class="text-[9px] uppercase font-bold text-slate-500 block mb-2">Main Image</label>
+                            <input name="image_url" value="${snippet.image_url || ''}" class="w-full bg-slate-950 p-2 rounded text-xs text-white border border-slate-800">
+                        </div>
+                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                            <label class="text-[9px] uppercase font-bold text-slate-500 block mb-2">Thumbnail</label>
+                            <input name="thumbnail_url" value="${snippet.thumbnail_url || ''}" class="w-full bg-slate-950 p-2 rounded text-xs text-white border border-slate-800">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs tracking-widest hover:scale-[1.02] transition-all">Update Snippet</button>
+                    <a href="/snippets/delete/${snippet.id}" onclick="return confirm('Delete this snippet permanently?')" class="block text-center text-rose-500 text-[10px] font-bold uppercase tracking-widest">Delete Snippet</a>
+                </div>
+
+                <div id="preview-container">
+                    </div>
+            </form>
+        </div>
+    </body>
+    </html>
     `);
 });
 
@@ -1451,86 +1460,48 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.commandName === 'snippet') {
-        const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-        const isHelper = hasHelperRole(interaction.member, settings);
-
-        if (!isAdmin && !isHelper) {
-            return interaction.reply({
-                content: "❌ **Access Denied:** You need a Command Helper Role or Administrator permissions.",
-                ephemeral: true
-            });
-        }
-
-        const parseVars = (text) => {
-        if (!text) return null;
-        return text
-            .replace(/{user}/g, interaction.user.toString())     // Mentions the user
-            .replace(/{username}/g, interaction.user.username)   // Plain text name
-            .replace(/{server}/g, interaction.guild.name)        // Server Name
-            .replace(/{channel}/g, interaction.channel.toString()) // Current Channel
-            .replace(/{br}/g, '\n');                             // Manual break
-        };
+        const userId = interaction.user.id;
+        const userName = interaction.user.username;
+        const userAvatar = `https://cdn.discordapp.com/avatars/${userId}/${interaction.user.avatar}.png`;
 
         const name = interaction.options.getString('name');
-
-        const snippet = db.prepare(`
-            SELECT * FROM snippets
-            WHERE guild_id = ? AND name = ? AND enabled = 1
-        `).get(interaction.guildId, name);
+        const snippet = db.prepare(`SELECT * FROM snippets WHERE guild_id = ? AND name = ? AND enabled = 1`).get(interaction.guildId, name.toLowerCase());
 
         if (!snippet) {
-            return interaction.reply({
-                content: "❌ Snippet not found or disabled.",
-                ephemeral: true
-            });
+            return interaction.reply({ content: "❌ Snippet not found or disabled.", ephemeral: true });
         }
-
-// Inside your snippet interaction handler
-try {
-    const embed = new EmbedBuilder()
-        .setTitle(parseVars(snippet.title))
-        .setURL(snippet.url || null)
-        .setDescription(parseVars(snippet.description))
-        .setColor(snippet.color || IMPULSE_COLOR)
-        .setTimestamp();
-
-        // Check if URLs are actually valid strings before setting them
-        if (snippet.image_url && snippet.image_url.startsWith('http')) {
-            embed.setImage(snippet.image_url);
-        }
-        if (snippet.thumbnail_url && snippet.thumbnail_url.startsWith('http')) {
-            embed.setThumbnail(snippet.thumbnail_url);
-        }
-        if (snippet.footer) {
-            embed.setFooter({ text: parseVars(snippet.footer) });
-        }
-
-      } catch (error) {
-        console.error("Embed Error:", error);
-        return interaction.reply({ content: "❌ Failed to send snippet. Check if your Image URLs are valid.", ephemeral: true });
-      }
 
         try {
+            const embed = new EmbedBuilder()
+                .setTitle(parseVars(snippet.title, interaction))
+                .setURL(snippet.url || null)
+                .setDescription(parseVars(snippet.description, interaction))
+                .setColor(snippet.color || "#FFAA00")
+                .setTimestamp();
+
+            if (snippet.image_url && snippet.image_url.startsWith('http')) embed.setImage(snippet.image_url);
+            if (snippet.thumbnail_url && snippet.thumbnail_url.startsWith('http')) embed.setThumbnail(snippet.thumbnail_url);
+            if (snippet.footer) embed.setFooter({ text: parseVars(snippet.footer, interaction) });
+
+            // Parse Fields
+            try {
                 const fields = JSON.parse(snippet.fields || '[]');
-                const parsedFields = fields.map(f => ({
-                    name: parseVars(f.name),
-                    value: parseVars(f.value),
-                    inline: f.inline
-                }));
-                if (parsedFields.length) embed.addFields(parsedFields);
-            } catch (e) { /* ignore */ }
+                if (fields.length > 0) {
+                    embed.addFields(fields.map(f => ({
+                        name: parseVars(f.name, interaction),
+                        value: parseVars(f.value, interaction),
+                        inline: f.inline
+                    })));
+                }
+            } catch (e) { /* silent fail on fields */ }
 
-        logAction(
-            interaction.guildId,
-            'SNIPPET',
-            `Used snippet: ${name}`,
-            userId,
-            userName,
-            userAvatar,
-            `/snippet name:${name}`
-        );
-
-        return interaction.reply({ embeds: [embed] });
+            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`);
+            
+            return interaction.reply({ embeds: [embed] });
+        } catch (error) {
+            console.error("Snippet Command Error:", error);
+            return interaction.reply({ content: "❌ There was an error rendering this snippet.", ephemeral: true });
+        }
     }
 
 });
