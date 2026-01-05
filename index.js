@@ -92,10 +92,9 @@ function hasHelperRole(member, settings) {
 }
 
 function parseVars(text, interaction = null) {
-    if (!text) return "";
-    let processed = text;
+    if (!text || text === "null") return "";
+    let processed = String(text); 
     
-    // Server & User Variables (only if called from a Discord command)
     if (interaction) {
         processed = processed
             .replace(/{user}/g, interaction.user.toString())
@@ -104,7 +103,6 @@ function parseVars(text, interaction = null) {
             .replace(/{channel}/g, interaction.channel.toString());
     }
     
-    // Global Formatting
     return processed.replace(/{br}/g, '\n');
 }
 
@@ -1054,7 +1052,13 @@ app.get('/snippets/edit/:id', async (req, res) => {
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-6xl mx-auto">
             ${getNav('snippets')}
-            <form method="POST" action="/snippets/edit/${snippet.id}" class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+            
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter text-[#FFAA00]">Edit Snippet</h1>
+                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying trigger: /snippet name:${snippet.name}</p>
+            </div>
+
+            <form id="editForm" method="POST" action="/snippets/edit/${snippet.id}" class="grid grid-cols-1 lg:grid-cols-2 gap-12">
                 <div class="space-y-6">
                     <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
                         <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Trigger Name (Command)</label>
@@ -1062,28 +1066,83 @@ app.get('/snippets/edit/:id', async (req, res) => {
                     </div>
 
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <input name="title" value="${snippet.title || ''}" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        <input name="url" value="${snippet.url || ''}" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        <textarea name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 focus:border-[#FFAA00] outline-none resize-none">${snippet.description || ''}</textarea>
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Embed Content</label>
+                        <input id="inTitle" name="title" value="${snippet.title || ''}" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        <input id="inUrl" name="url" value="${snippet.url || ''}" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        <textarea id="inDesc" name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 focus:border-[#FFAA00] outline-none resize-none">${snippet.description || ''}</textarea>
                     </div>
 
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                         <input name="footer" value="${snippet.footer || ''}" placeholder="Footer Text" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                         <div class="grid grid-cols-2 gap-4">
-                            <input name="image_url" value="${snippet.image_url || ''}" placeholder="Image URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
-                            <input name="thumbnail_url" value="${snippet.thumbnail_url || ''}" placeholder="Thumbnail URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
-                         </div>
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Assets & Footer</label>
+                        <input id="inFooter" name="footer" value="${snippet.footer || ''}" placeholder="Footer Text" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        <div class="grid grid-cols-2 gap-4">
+                            <input id="inImage" name="image_url" value="${snippet.image_url || ''}" placeholder="Main Image URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+                            <input id="inThumb" name="thumbnail_url" value="${snippet.thumbnail_url || ''}" placeholder="Thumbnail URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+                        </div>
                     </div>
 
-                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs tracking-widest hover:bg-[#FFC040] transition-all">Update Snippet</button>
-                    <a href="/snippets/delete/${snippet.id}" class="block text-center text-rose-500 text-[10px] font-bold uppercase mt-4" onclick="return confirm('Are you sure?')">Delete Snippet</a>
+                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs tracking-widest hover:bg-[#FFC040] transition-all shadow-lg shadow-amber-500/10">Save Changes</button>
+                    <a href="/snippets" class="block text-center text-slate-500 text-[10px] font-bold uppercase hover:text-white">Cancel & Exit</a>
                 </div>
-                
-                <div class="hidden lg:block">
-                    <p class="text-slate-600 text-[10px] uppercase font-bold text-center">Preview Mode Active</p>
+
+                <div class="sticky top-6">
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4 block text-center">Live Preview</label>
+                    <div class="bg-[#313338] p-4 rounded-sm shadow-2xl font-['gg_sans',_sans-serif]">
+                        <div class="flex items-start gap-4">
+                            <img src="${client.user.displayAvatarURL()}" class="w-10 h-10 rounded-full">
+                            <div class="flex-1 overflow-hidden">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="font-medium text-white text-sm">${client.user.username}</span>
+                                    <span class="bg-[#5865F2] text-white text-[10px] px-1.5 py-0.5 rounded-[3px] font-bold uppercase">App</span>
+                                    <span class="text-[#949ba4] text-[10px]">Today at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                </div>
+                                
+                                <div id="preBorder" class="bg-[#2b2d31] border-l-[4px] border-[#FFAA00] rounded-[4px] p-3 mt-1 max-w-[432px] relative">
+                                    <img id="preThumb" src="" class="absolute top-3 right-3 w-20 h-20 rounded-md object-cover">
+                                    <div id="preTitle" class="text-white font-bold text-base mb-1"></div>
+                                    <div id="preDesc" class="text-[#dbdee1] text-sm leading-[1.375rem] whitespace-pre-wrap"></div>
+                                    <img id="preImage" src="" class="mt-3 rounded-md w-full max-h-80 object-cover">
+                                    <div id="preFooter" class="text-[#b5bac1] text-[10px] mt-2 font-medium"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </form>
         </div>
+
+        <script>
+            // Reuse your updatePreview script here to keep the experience consistent!
+            const inputs = {
+                title: document.getElementById('inTitle'),
+                desc: document.getElementById('inDesc'),
+                footer: document.getElementById('inFooter'),
+                url: document.getElementById('inUrl'),
+                image: document.getElementById('inImage'),
+                thumb: document.getElementById('inThumb')
+            };
+
+            const preview = {
+                title: document.getElementById('preTitle'),
+                desc: document.getElementById('preDesc'),
+                footer: document.getElementById('preFooter'),
+                image: document.getElementById('preImage'),
+                thumb: document.getElementById('preThumb')
+            };
+
+            function update() {
+                preview.title.innerText = inputs.title.value;
+                preview.desc.innerText = inputs.desc.value;
+                preview.footer.innerText = inputs.footer.value;
+                preview.image.src = inputs.image.value;
+                preview.image.style.display = inputs.image.value ? 'block' : 'none';
+                preview.thumb.src = inputs.thumb.value;
+                preview.thumb.style.display = inputs.thumb.value ? 'block' : 'none';
+            }
+
+            Object.values(inputs).forEach(i => i.addEventListener('input', update));
+            update();
+        </script>
     </body>
     </html>
     `);
