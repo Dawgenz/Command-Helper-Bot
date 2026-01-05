@@ -91,6 +91,23 @@ function hasHelperRole(member, settings) {
     return member.roles.cache.some(role => roleIDs.includes(role.id));
 }
 
+function parseVars(text, interaction = null) {
+    if (!text) return "";
+    let processed = text;
+    
+    // Server & User Variables (only if called from a Discord command)
+    if (interaction) {
+        processed = processed
+            .replace(/{user}/g, interaction.user.toString())
+            .replace(/{username}/g, interaction.user.username)
+            .replace(/{server}/g, interaction.guild.name)
+            .replace(/{channel}/g, interaction.channel.toString());
+    }
+    
+    // Global Formatting
+    return processed.replace(/{br}/g, '\n');
+}
+
 // --- PASSPORT / OAUTH2 CONFIG ---
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
@@ -1029,10 +1046,7 @@ app.get('/snippets/edit/:id', async (req, res) => {
 
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
     if (!snippet) return res.redirect('/snippets');
-
-    if (!(await canManageSnippet(req, snippet.guild_id))) {
-        return res.status(403).send("Forbidden");
-    }
+    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("Forbidden");
 
     res.send(`
     <html>
@@ -1040,39 +1054,34 @@ app.get('/snippets/edit/:id', async (req, res) => {
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-6xl mx-auto">
             ${getNav('snippets')}
-            <div class="mb-8">
-                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Edit <span class="text-[#FFAA00]">Snippet</span></h1>
-                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying: ${snippet.name}</p>
-            </div>
-
             <form method="POST" action="/snippets/edit/${snippet.id}" class="grid grid-cols-1 lg:grid-cols-2 gap-12">
                 <div class="space-y-6">
+                    <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Trigger Name (Command)</label>
+                        <input name="name" value="${snippet.name}" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none">
+                    </div>
+
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <input name="title" value="${snippet.title || ''}" placeholder="Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
-                        <input name="url" value="${snippet.url || ''}" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
-                    </div>
-                    
-                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800">
-                        <textarea name="description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 outline-none resize-none">${snippet.description || ''}</textarea>
+                        <input name="title" value="${snippet.title || ''}" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        <input name="url" value="${snippet.url || ''}" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        <textarea name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 focus:border-[#FFAA00] outline-none resize-none">${snippet.description || ''}</textarea>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label class="text-[9px] uppercase font-bold text-slate-500 block mb-2">Main Image</label>
-                            <input name="image_url" value="${snippet.image_url || ''}" class="w-full bg-slate-950 p-2 rounded text-xs text-white border border-slate-800">
-                        </div>
-                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label class="text-[9px] uppercase font-bold text-slate-500 block mb-2">Thumbnail</label>
-                            <input name="thumbnail_url" value="${snippet.thumbnail_url || ''}" class="w-full bg-slate-950 p-2 rounded text-xs text-white border border-slate-800">
-                        </div>
+                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
+                         <input name="footer" value="${snippet.footer || ''}" placeholder="Footer Text" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
+                         <div class="grid grid-cols-2 gap-4">
+                            <input name="image_url" value="${snippet.image_url || ''}" placeholder="Image URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+                            <input name="thumbnail_url" value="${snippet.thumbnail_url || ''}" placeholder="Thumbnail URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+                         </div>
                     </div>
 
-                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs tracking-widest hover:scale-[1.02] transition-all">Update Snippet</button>
-                    <a href="/snippets/delete/${snippet.id}" onclick="return confirm('Delete this snippet permanently?')" class="block text-center text-rose-500 text-[10px] font-bold uppercase tracking-widest">Delete Snippet</a>
+                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs tracking-widest hover:bg-[#FFC040] transition-all">Update Snippet</button>
+                    <a href="/snippets/delete/${snippet.id}" class="block text-center text-rose-500 text-[10px] font-bold uppercase mt-4" onclick="return confirm('Are you sure?')">Delete Snippet</a>
                 </div>
-
-                <div id="preview-container">
-                    </div>
+                
+                <div class="hidden lg:block">
+                    <p class="text-slate-600 text-[10px] uppercase font-bold text-center">Preview Mode Active</p>
+                </div>
             </form>
         </div>
     </body>
@@ -1080,15 +1089,22 @@ app.get('/snippets/edit/:id', async (req, res) => {
     `);
 });
 
-app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), (req, res) => {
-    const { title, description, color, footer } = req.body;
+app.post('/snippets/edit/:id', async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+
+    const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
+    if (!snippet || !(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("Forbidden");
+
+    const { name, title, description, footer, url, image_url, thumbnail_url } = req.body;
 
     db.prepare(`
-        UPDATE snippets
-        SET title = ?, description = ?, color = ?, footer = ?, updated_at = CURRENT_TIMESTAMP
+        UPDATE snippets 
+        SET name = ?, title = ?, description = ?, footer = ?, url = ?, image_url = ?, thumbnail_url = ?
         WHERE id = ?
-    `).run(title, description, color, footer, req.params.id);
+    `).run(name.toLowerCase(), title, description, footer, url, image_url, thumbnail_url, req.params.id);
 
+    logAction(snippet.guild_id, 'SNIPPET_UPDATE', `Updated snippet: ${name}`, req.user.id, req.user.username, `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`);
+    
     res.redirect('/snippets');
 });
 
