@@ -23,7 +23,16 @@ db.prepare(`CREATE TABLE IF NOT EXISTS guild_settings (
     forum_id TEXT,
     resolved_tag TEXT,
     duplicate_tag TEXT,
+    unanswered_tag TEXT,
     helper_role_id TEXT
+)`).run();
+
+db.prepare(`CREATE TABLE IF NOT EXISTS thread_tracking (
+    thread_id TEXT PRIMARY KEY,
+    guild_id TEXT,
+    created_at INTEGER,
+    stale_warning_sent INTEGER DEFAULT 0,
+    last_renewed_at INTEGER
 )`).run();
 db.prepare('CREATE TABLE IF NOT EXISTS pending_locks (thread_id TEXT PRIMARY KEY, guild_id TEXT, lock_at INTEGER)').run();
 db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (
@@ -62,6 +71,15 @@ try {
 } catch (e) {
     // Columns already exist
 }
+
+try {
+    db.prepare(`ALTER TABLE guild_settings ADD COLUMN unanswered_tag TEXT`).run();
+} catch (e) { /* Column exists */ }
+
+try {
+    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN stale_warning_sent INTEGER DEFAULT 0`).run();
+    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN last_renewed_at INTEGER`).run();
+} catch (e) { /* Columns exist */ }
 
 // --- HELPERS ---
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
@@ -241,12 +259,17 @@ const getActionColor = (action) => {
         'SNIPPET_CREATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'SNIPPET_UPDATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'SNIPPET_DELETE': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+        'SNIPPET': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'LOCK': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
         'CANCEL': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
         'GREET': 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
         'DUPLICATE': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
         'SETUP': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
-        'RESOLVED': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+        'RESOLVED': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+        'ANSWERED': 'bg-green-500/10 text-green-500 border-green-500/20',
+        'AUTO_CLOSE': 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+        'STALE_WARNING': 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+        'THREAD_RENEWED': 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20'
     };
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
@@ -565,7 +588,9 @@ app.get('/logs', async (req, res) => {
         'SETUP', 
         'RESOLVED',
         'ANSWERED',
-        'AUTO_CLOSE'
+        'AUTO_CLOSE',
+        'STALE_WARNING',
+        'THREAD_RENEWED'
     ];
     
     const managedGuilds = managedGuildIds.map(id => {
@@ -1509,10 +1534,53 @@ app.listen(3000, '0.0.0.0');
 // --- BOT EVENTS ---
 const IMPULSE_COLOR = 0xFFAA00;
 
-client.once('clientReady', (c) => {
+client.once('clientReady', async (c) => {
     console.log(`✅ Logged in as ${c.user.tag}`);
     
-    // Timer for locking resolved threads
+    // ONE-TIME: Scan and track threads from the last 2 weeks
+    console.log('📊 Scanning existing threads from the last 2 weeks...');
+    const twoWeeksAgo = Date.now() - (14 * 24 * 60 * 60 * 1000);
+    
+    const allSettings = db.prepare('SELECT * FROM guild_settings').all();
+    for (const settings of allSettings) {
+        try {
+            const guild = client.guilds.cache.get(settings.guild_id);
+            if (!guild) continue;
+            
+            const forumChannel = await guild.channels.fetch(settings.forum_id).catch(() => null);
+            if (!forumChannel || !forumChannel.isThreadOnly()) continue;
+            
+            // Fetch all active threads
+            const threads = await forumChannel.threads.fetchActive();
+            
+            for (const [threadId, thread] of threads.threads) {
+                // Only track threads created in the last 2 weeks
+                if (thread.createdTimestamp && thread.createdTimestamp >= twoWeeksAgo) {
+                    // Skip threads that already have the resolved tag
+                    if (thread.appliedTags.includes(settings.resolved_tag)) {
+                        console.log(`⏭️  Skipping resolved thread: ${thread.name}`);
+                        continue;
+                    }
+                    
+                    // Check if already being tracked
+                    const existing = db.prepare('SELECT * FROM thread_tracking WHERE thread_id = ?').get(threadId);
+                    if (!existing) {
+                        db.prepare('INSERT INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)').run(
+                            threadId,
+                            settings.guild_id,
+                            thread.createdTimestamp || Date.now()
+                        );
+                        console.log(`✅ Now tracking thread: ${thread.name} (${threadId})`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`Error scanning threads for guild ${settings.guild_id}:`, error);
+        }
+    }
+    console.log('✅ Initial thread scan complete!');
+    
+    // Timer for locking resolved threads (every 1 minute)
     setInterval(async () => {
         const rows = db.prepare('SELECT * FROM pending_locks WHERE lock_at <= ?').all(Date.now());
         for (const row of rows) {
@@ -1539,41 +1607,122 @@ client.once('clientReady', (c) => {
         }
     }, 60000);
 
-    // Timer for auto-closing threads older than 30 days
     setInterval(async () => {
-        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-        const oldThreads = db.prepare('SELECT * FROM thread_tracking WHERE created_at <= ?').all(thirtyDaysAgo);
+        await checkStaleThreads();
+    }, 6 * 60 * 60 * 1000);
+    
+    await checkStaleThreads();
+});
+
+async function checkStaleThreads() {
+    console.log('🔍 Checking for stale threads...');
+    
+    // 24 days = send warning (giving 6 hours to respond)
+    const warningThreshold = Date.now() - (24 * 24 * 60 * 60 * 1000);
+    // 30 days = auto-close
+    const closeThreshold = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    
+    // Get threads that need warnings (24+ days old, no warning sent yet)
+    const threadsNeedingWarning = db.prepare(`
+        SELECT * FROM thread_tracking 
+        WHERE created_at <= ? 
+        AND stale_warning_sent = 0
+        AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
+    `).all(warningThreshold, warningThreshold);
+    
+    for (const tracked of threadsNeedingWarning) {
+        const settings = getSettings(tracked.guild_id);
+        if (!settings) continue;
         
-        for (const tracked of oldThreads) {
-            const settings = getSettings(tracked.guild_id);
-            if (!settings) continue;
+        try {
+            const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
+            if (!thread || thread.locked || thread.archived) continue;
             
-            try {
-                const thread = await client.channels.fetch(tracked.thread_id);
-                if (thread && !thread.locked) {
-                    await thread.setLocked(true);
-                    
-                    const autoCloseEmbed = new EmbedBuilder()
-                        .setTitle("🔒 Thread Auto-Closed")
-                        .setDescription("This thread has been automatically closed due to 30+ days of inactivity. If you still need help, please create a new thread.")
-                        .setColor(0x6B7280)
-                        .setTimestamp()
-                        .setFooter({ text: "Impulse Bot • Auto-Close" });
-                    
-                    await thread.send({ embeds: [autoCloseEmbed] });
-                    logAction(tracked.guild_id, 'AUTO_CLOSE', `Auto-closed old thread: ${thread.name}`);
-                }
-            } catch (e) { 
-                console.error("Auto-close error:", e); 
+            // Skip if thread already has resolved tag
+            if (thread.appliedTags.includes(settings.resolved_tag)) {
+                db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
+                continue;
             }
             
-            db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
+            // Send warning to thread owner
+            const warningEmbed = new EmbedBuilder()
+                .setTitle("⚠️ Thread Inactivity Warning")
+                .setDescription(
+                    `Hey <@${thread.ownerId}>! This thread has been inactive for **24 days** and will be automatically closed in **6 hours** due to inactivity.\n\n` +
+                    `**To keep this thread open:**\n` +
+                    `• Reply to this thread, OR\n` +
+                    `• Use the \`/cancel\` command to renew it\n\n` +
+                    `If you no longer need help, you can safely ignore this message.`
+                )
+                .setColor(0xF59E0B)
+                .setTimestamp()
+                .setFooter({ text: "Impulse Bot • Stale Thread Warning" });
+            
+            await thread.send({ content: `<@${thread.ownerId}>`, embeds: [warningEmbed] });
+            
+            // Mark warning as sent
+            db.prepare('UPDATE thread_tracking SET stale_warning_sent = 1 WHERE thread_id = ?').run(tracked.thread_id);
+            logAction(tracked.guild_id, 'STALE_WARNING', `Sent stale warning for: ${thread.name}`);
+            
+            console.log(`⚠️  Sent stale warning for thread: ${thread.name}`);
+        } catch (error) {
+            console.error(`Error sending stale warning for thread ${tracked.thread_id}:`, error);
         }
-    }, 6 * 60 * 60 * 1000); // Check every 6 hours
-});
+    }
+    
+    // Get threads that should be closed (30+ days old with warning sent)
+    const threadsToClose = db.prepare(`
+        SELECT * FROM thread_tracking 
+        WHERE created_at <= ?
+        AND stale_warning_sent = 1
+        AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
+    `).all(closeThreshold, closeThreshold);
+    
+    for (const tracked of threadsToClose) {
+        const settings = getSettings(tracked.guild_id);
+        if (!settings) continue;
+        
+        try {
+            const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
+            if (!thread || thread.locked || thread.archived) {
+                db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
+                continue;
+            }
+            
+            // Skip if thread already has resolved tag
+            if (thread.appliedTags.includes(settings.resolved_tag)) {
+                db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
+                continue;
+            }
+            
+            await thread.setLocked(true);
+            
+            const autoCloseEmbed = new EmbedBuilder()
+                .setTitle("🔒 Thread Auto-Closed")
+                .setDescription("This thread has been automatically closed due to 30+ days of inactivity. If you still need help, please create a new thread.")
+                .setColor(0x6B7280)
+                .setTimestamp()
+                .setFooter({ text: "Impulse Bot • Auto-Close" });
+            
+            await thread.send({ embeds: [autoCloseEmbed] });
+            logAction(tracked.guild_id, 'AUTO_CLOSE', `Auto-closed stale thread: ${thread.name}`);
+            
+            // Remove from tracking
+            db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
+            
+            console.log(`🔒 Auto-closed stale thread: ${thread.name}`);
+        } catch (error) {
+            console.error(`Error auto-closing thread ${tracked.thread_id}:`, error);
+        }
+    }
+    
+    console.log('✅ Stale thread check complete!');
+}
 
 client.on('threadCreate', async (thread) => {
     const settings = getSettings(thread.guildId);
+    
+    // CRITICAL: Only run if setup is complete
     if (!settings || thread.parentId !== settings.forum_id) return;
 
     // Track thread creation time for auto-closing
@@ -1593,7 +1742,7 @@ client.on('threadCreate', async (thread) => {
     }
 
     const welcomeEmbed = new EmbedBuilder()
-        .setTitle("Welcome to Support!")
+        .setTitle("Welcome to the Command Help Thread!")
         .setDescription(
             `Hey <@${thread.ownerId}>!\n\n` +
             `**What happens next?**\n` +
@@ -1616,18 +1765,31 @@ client.on('messageCreate', async (message) => {
     if (!message.channel.isThread()) return;
 
     const settings = getSettings(message.guildId);
+    
     if (!settings || !settings.unanswered_tag) return;
     if (message.channel.parentId !== settings.forum_id) return;
 
     try {
         const currentTags = message.channel.appliedTags;
-        if (currentTags.includes(settings.unanswered_tag)) {
+        
+        // Only remove unanswered tag if:
+        // 1. The thread has the unanswered tag
+        // 2. The message is NOT from the thread owner (OP)
+        if (currentTags.includes(settings.unanswered_tag) && message.author.id !== message.channel.ownerId) {
             const newTags = currentTags.filter(tag => tag !== settings.unanswered_tag);
             await message.channel.setAppliedTags(newTags);
             logAction(message.guildId, 'ANSWERED', `Removed unanswered tag from: ${message.channel.name}`);
         }
     } catch (e) {
         console.error("Error removing unanswered tag:", e);
+    }
+    
+    // Reset stale warning if thread owner replies
+    if (message.author.id === message.channel.ownerId) {
+        db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(
+            Date.now(),
+            message.channel.id
+        );
     }
 });
 
@@ -1755,35 +1917,74 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.commandName === 'cancel') {
-        const existing = db.prepare('SELECT * FROM pending_locks WHERE thread_id = ?').get(interaction.channelId);
-        
-        if (!existing) {
+        const settings = getSettings(interaction.guildId);
+        if (!settings) {
             return interaction.reply({ 
-                content: "❌ There is no pending lock timer for this thread.", 
+                content: "❌ This server hasn't been configured yet. An admin needs to run `/setup` first.", 
                 ephemeral: true 
             });
         }
         
-        db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(interaction.channelId);
+        const existing = db.prepare('SELECT * FROM pending_locks WHERE thread_id = ?').get(interaction.channelId);
         
-        logAction(
-            interaction.guildId,
-            'CANCEL',
-            `Cancelled lock timer for: ${interaction.channel.name}`,
-            userId,
-            userName,
-            userAvatar,
-            '/cancel'
-        );
+        if (existing) {
+            // Cancel the pending lock
+            db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(interaction.channelId);
+            
+            logAction(
+                interaction.guildId,
+                'CANCEL',
+                `Cancelled lock timer for: ${interaction.channel.name}`,
+                userId,
+                userName,
+                userAvatar,
+                '/cancel'
+            );
+            
+            const cancelEmbed = new EmbedBuilder()
+                .setTitle("🔓 Lock Timer Cancelled")
+                .setDescription("The automatic lock has been cancelled. This thread will remain open.")
+                .setColor(0xF59E0B)
+                .setTimestamp()
+                .setFooter({ text: "Impulse Bot" });
+            
+            await interaction.reply({ embeds: [cancelEmbed] });
+        }
         
-        const cancelEmbed = new EmbedBuilder()
-            .setTitle("🔓 Lock Timer Cancelled")
-            .setDescription("The automatic lock has been cancelled. This thread will remain open.")
-            .setColor(0xF59E0B)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot" });
+        // ALSO check for stale thread renewal
+        const tracked = db.prepare('SELECT * FROM thread_tracking WHERE thread_id = ?').get(interaction.channelId);
         
-        await interaction.reply({ embeds: [cancelEmbed] });
+        if (tracked && tracked.stale_warning_sent === 1) {
+            // Renew the thread
+            db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(
+                Date.now(),
+                interaction.channelId
+            );
+            
+            logAction(
+                interaction.guildId,
+                'THREAD_RENEWED',
+                `Thread renewed: ${interaction.channel.name}`,
+                userId,
+                userName,
+                userAvatar,
+                '/cancel'
+            );
+            
+            const renewEmbed = new EmbedBuilder()
+                .setTitle("♻️ Thread Renewed")
+                .setDescription("This thread has been renewed and will no longer be auto-closed for inactivity. The 30-day timer has been reset.")
+                .setColor(0x10B981)
+                .setTimestamp()
+                .setFooter({ text: "Impulse Bot" });
+            
+            await interaction.reply({ embeds: [renewEmbed] });
+        } else if (!existing && !tracked) {
+            return interaction.reply({ 
+                content: "❌ There is no pending lock timer or stale warning for this thread.", 
+                ephemeral: true 
+            });
+        }
     }
 
     if (interaction.commandName === 'duplicate') {
