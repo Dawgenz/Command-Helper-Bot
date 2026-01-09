@@ -571,19 +571,28 @@ app.get('/', async (req, res) => {
             
             function updateTimestamps() {
                 document.querySelectorAll('[data-timestamp]').forEach(el => {
-                    const timestamp = el.getAttribute('data-timestamp');
-                    // If the DB date doesn't have a 'Z', browser might think it's local. 
-                    // We force it to UTC by adding 'Z' if it's missing, then the browser converts to local.
-                    const date = new Date(timestamp.includes(' ') ? timestamp.replace(' ', 'T') + 'Z' : timestamp);
-                    
-                    const timeStr = date.toLocaleString(undefined, {
-                        month: '2-digit',
-                        day: '2-digit',
+                    const raw = el.getAttribute('data-timestamp');
+                    if (!raw || raw === "null") return;
+
+                    // SQLite format is "YYYY-MM-DD HH:MM:SS"
+                    // We need to change it to "YYYY-MM-DDTHH:MM:SSZ" to force UTC parsing
+                    const isoString = raw.replace(' ', 'T') + 'Z';
+                    const date = new Date(isoString);
+
+                    // If the date is invalid, stop
+                    if (isNaN(date.getTime())) return;
+
+                    // Use the browser's local settings for a perfect match to the user's clock
+                    const formatted = date.toLocaleString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
                         hour: '2-digit',
                         minute: '2-digit',
                         hour12: true
                     });
-                    el.innerText = timeStr;
+
+                    el.innerText = formatted;
                 });
             }
             
@@ -732,10 +741,10 @@ app.get('/logs', async (req, res) => {
                                 
                                 return `
                                 <tr class="hover:bg-white/5 transition-colors">
-                                    <td class="p-4 text-[10px] text-slate-500 whitespace-nowrap font-mono">
-                                        <div class="font-bold">${formattedDate}</div>
-                                        <div class="text-slate-600">${formattedTime}</div>
-                                    </td>
+                                        <td class="p-4 text-[10px] text-slate-500 whitespace-nowrap font-mono">
+                                            <!-- We leave this span empty and let the frontend script fill it -->
+                                            <span class="font-bold block" data-timestamp="${l.timestamp}">Loading...</span>
+                                        </td>
                                     <td class="p-4">
                                         <span class="text-[10px] font-black text-[#FFAA00] uppercase bg-[#FFAA00]/5 px-2 py-1 rounded border border-[#FFAA00]/10">
                                             ${l.displayName}
