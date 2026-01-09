@@ -177,7 +177,9 @@ function parseVars(text, interaction = null) {
             .replace(/{channel}/g, interaction.channel.toString());
     }
     
-    return processed.replace(/{br}/g, '\n');
+    processed = processed.replace(/{br}/g, '\n');
+    
+    return processed.length > 4000 ? processed.substring(0, 4000) + "..." : processed;
 }
 
 function getErrorPage(title, message, code = "403") {
@@ -1401,8 +1403,8 @@ app.post('/snippets/new', express.urlencoded({ extended: true }), async (req, re
             req.user.username, 
             `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
             '/snippet',
-            threadId, 
-            messageId
+            null, 
+            null
         );
 
         res.redirect('/snippets');
@@ -1556,8 +1558,8 @@ app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), async (re
             req.user.id, 
             req.user.username, 
             `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-            threadId,
-            messageId
+            null,
+            null
         );
         
         res.redirect('/snippets');
@@ -1567,13 +1569,13 @@ app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), async (re
     }
 });
 
-app.get('/snippets/delete/:id', (req, res) => {
+app.get('/snippets/delete/:id', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
     if (!snippet) return res.redirect('/snippets');
 
-    if (!canManageSnippet(req, snippet)) { 
+    if (!(await canManageSnippet(req, snippet.guild_id))) { 
         return res.status(403).send(getErrorPage("Access Denied", "Deletion sequence aborted. Required permissions not detected."));
     }
 
@@ -1586,8 +1588,8 @@ app.get('/snippets/delete/:id', (req, res) => {
         req.user.id,
         req.user.username,
         `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-        threadId,
-        messageId
+        null,
+        null
     );
 
     res.redirect('/snippets');
@@ -1802,17 +1804,18 @@ client.on('threadCreate', async (thread) => {
     const settings = getSettings(thread.guildId);
     if (!settings || thread.parentId !== settings.forum_id) return;
 
-    // Track thread creation time for auto-closing
     db.prepare('INSERT OR REPLACE INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)').run(
         thread.id,
         thread.guildId,
         Date.now()
     );
 
-    // Apply unanswered tag if configured
     if (settings.unanswered_tag) {
         try {
-            await thread.setAppliedTags([settings.unanswered_tag]);
+            const currentTags = thread.appliedTags || [];
+            if (!currentTags.includes(settings.unanswered_tag)) {
+                await thread.setAppliedTags([...currentTags, settings.unanswered_tag]);
+            }
         } catch (e) {
             console.error("Error applying unanswered tag:", e);
         }
@@ -2031,33 +2034,32 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.commandName === 'resolved') {
-            const customMinutes = interaction.options.getInteger('minutes') || 30;
-            const lockTime = Date.now() + (customMinutes * 60 * 1000);
-            
-            db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(
-                interaction.channelId, 
-                interaction.guildId, 
-                lockTime
-            );
-            
-            const resolvedEmbed = new EmbedBuilder()
-                .setTitle("✅ Thread Marked as Resolved")
-                .setDescription(`This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R>.`)
-                .setColor(0x10B981)
-                .setTimestamp();
-            
-            // FIX: Capture the reply so we have the message ID
-            const reply = await interaction.reply({ embeds: [resolvedEmbed], fetchReply: true });
+        const lockTime = Date.now() + (30 * 60 * 1000); // Hardcoded 30 mins
+        
+        db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(
+            interaction.channelId, 
+            interaction.guildId, 
+            lockTime
+        );
+        
+        const resolvedEmbed = new EmbedBuilder()
+            .setTitle("✅ Thread Marked as Resolved")
+            .setDescription(`This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R>.`)
+            .setColor(0x10B981)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot • Timer: 30m" });
+        
+        const reply = await interaction.reply({ embeds: [resolvedEmbed], fetchReply: true });
 
-            logAction(
-                interaction.guildId, 
-                'RESOLVED', 
-                `Marked thread for locking: ${interaction.channel.name}`,
-                userId, userName, userAvatar,
-                `/resolved minutes:${customMinutes}`,
-                interaction.channelId, // The thread ID
-                reply.id // The message ID
-            );
+        logAction(
+            interaction.guildId, 
+            'RESOLVED', 
+            `Marked thread for locking (30m): ${interaction.channel.name}`,
+            userId, userName, userAvatar,
+            '/resolved',
+            interaction.channelId, 
+            reply.id 
+        );
     }
 
     if (interaction.commandName === 'cancel') {
@@ -2088,7 +2090,17 @@ client.on('interactionCreate', async (interaction) => {
                 fetchReply: true 
             });
 
-            logAction(interaction.guildId, 'THREAD_RENEWED', `Thread renewed: ${interaction.channel.name}`, userId, userName, userAvatar, '/cancel', interaction.channelId, reply.id);
+            logAction(
+                interaction.guildId,
+                'THREAD_RENEWED',
+                `Thread renewed: ${interaction.channel.name}`,
+                userId,
+                userName,
+                userAvatar,
+                '/cancel',
+                interaction.channelId,
+                reply.id
+            );
         } else {
             return interaction.reply({ content: "❌ There is no pending lock timer or stale warning for this thread.", ephemeral: true });
         }
@@ -2102,11 +2114,12 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: "❌ **Access Denied**", ephemeral: true });
         }
 
-        // FIX: Use getString instead of getRaw
         const link = interaction.options.getString('link');
-        
+
         try {
-            await interaction.channel.setAppliedTags([settings.duplicate_tag]);
+            const currentTags = interaction.channel.appliedTags || [];
+            const newTags = [...currentTags.filter(t => t !== settings.unanswered_tag), settings.duplicate_tag];
+            await interaction.channel.setAppliedTags(newTags);
             
             const duplicateEmbed = new EmbedBuilder()
                 .setTitle("🔄 Thread Closed: Duplicate")
@@ -2132,7 +2145,10 @@ client.on('interactionCreate', async (interaction) => {
         const snippet = db.prepare(`SELECT * FROM snippets WHERE guild_id = ? AND name = ? AND enabled = 1`).get(interaction.guildId, name.toLowerCase());
 
         if (!snippet) {
-            return res.status(404).send(getErrorPage("Not Found", "We couldn't find the snippet you're looking for. It may have been deleted."));
+            return interaction.reply({ 
+                content: "❌ We couldn't find the snippet you're looking for. It may have been deleted.", 
+                ephemeral: true 
+            });
         }
 
         try {

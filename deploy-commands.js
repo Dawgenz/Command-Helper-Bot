@@ -5,13 +5,7 @@ const commands = [
     // RESOLVED COMMAND
     new SlashCommandBuilder()
         .setName('resolved')
-        .setDescription('Marks this thread as resolved and locks it after a set time')
-        .addIntegerOption(option =>
-            option.setName('minutes')
-                .setDescription('Minutes until lock (default: 30, max: 1440)')
-                .setRequired(false)
-                .setMinValue(1)
-                .setMaxValue(1440)),
+        .setDescription('Marks this thread as resolved and locks it after 30 minutes'),
     
     // CANCEL COMMAND
     new SlashCommandBuilder()
