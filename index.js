@@ -556,22 +556,9 @@ app.get('/', async (req, res) => {
         </div>
         <div class="mt-6 text-center text-xs text-slate-600 font-mono">
                 Showing ${logs.length} ${logs.length === 1 ? 'entry' : 'entries'} • Last updated: ${new Date().toLocaleTimeString()}
+            </div>
         </div>
         <script>
-            function updateTimers() {
-                document.querySelectorAll('[data-expire]').forEach(el => {
-                    const diff = parseInt(el.getAttribute('data-expire')) - Date.now();
-                    if (diff <= 0) {
-                        el.innerText = "LOCKED";
-                        el.className = "text-xs font-bold text-rose-500 mono uppercase";
-                    } else {
-                        const m = Math.floor(diff / 60000);
-                        const s = Math.floor((diff % 60000) / 1000);
-                        el.innerText = m + "m " + s + "s";
-                    }
-                });
-            }
-            
             function updateTimestamps() {
                 document.querySelectorAll('[data-timestamp]').forEach(el => {
                     const raw = el.getAttribute('data-timestamp');
@@ -585,12 +572,11 @@ app.get('/', async (req, res) => {
                     });
                 });
             }
-            
-            setInterval(updateTimers, 1000); 
-            updateTimers();
             updateTimestamps();
         </script>
-    </body></html>`);
+    </body>
+    </html>
+    `);
 });
 
 app.get('/logs', async (req, res) => {
