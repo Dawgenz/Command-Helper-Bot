@@ -1998,76 +1998,35 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.commandName === 'cancel') {
         const settings = getSettings(interaction.guildId);
-        if (!settings) {
-            return interaction.reply({ 
-                content: "❌ This server hasn't been configured yet. An admin needs to run `/setup` first.", 
-                ephemeral: true 
-            });
-        }
+        if (!settings) return interaction.reply({ content: "❌ Not configured.", ephemeral: true });
         
         const existing = db.prepare('SELECT * FROM pending_locks WHERE thread_id = ?').get(interaction.channelId);
         
         if (existing) {
-            // Cancel the pending lock
             db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(interaction.channelId);
             
-            logAction(
-                interaction.guildId,
-                'CANCEL',
-                `Cancelled lock timer for: ${interaction.channel.name}`,
-                userId,
-                userName,
-                userAvatar,
-                '/cancel',
-                null,
-                null
-            );
-            
-            const cancelEmbed = new EmbedBuilder()
-                .setTitle("🔓 Lock Timer Cancelled")
-                .setDescription("The automatic lock has been cancelled. This thread will remain open.")
-                .setColor(0xF59E0B)
-                .setTimestamp()
-                .setFooter({ text: "Impulse Bot" });
-            
-            await interaction.reply({ embeds: [cancelEmbed] });
+            const reply = await interaction.reply({ 
+                embeds: [new EmbedBuilder().setTitle("🔓 Lock Timer Cancelled").setDescription("The automatic lock has been cancelled.").setColor(0xF59E0B)],
+                fetchReply: true 
+            });
+
+            logAction(interaction.guildId, 'CANCEL', `Cancelled lock timer: ${interaction.channel.name}`, userId, userName, userAvatar, '/cancel', interaction.channelId, reply.id);
+            return; // Exit after handling
         }
         
-        // ALSO check for stale thread renewal
         const tracked = db.prepare('SELECT * FROM thread_tracking WHERE thread_id = ?').get(interaction.channelId);
         
         if (tracked && tracked.stale_warning_sent === 1) {
-            // Renew the thread
-            db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(
-                Date.now(),
-                interaction.channelId
-            );
+            db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(Date.now(), interaction.channelId);
             
-            logAction(
-                interaction.guildId,
-                'THREAD_RENEWED',
-                `Thread renewed: ${interaction.channel.name}`,
-                userId,
-                userName,
-                userAvatar,
-                '/cancel',
-                threadId,
-                messageId
-            );
-            
-            const renewEmbed = new EmbedBuilder()
-                .setTitle("♻️ Thread Renewed")
-                .setDescription("This thread has been renewed and will no longer be auto-closed for inactivity. The 30-day timer has been reset.")
-                .setColor(0x10B981)
-                .setTimestamp()
-                .setFooter({ text: "Impulse Bot" });
-            
-            await interaction.reply({ embeds: [renewEmbed] });
-        } else if (!existing && !tracked) {
-            return interaction.reply({ 
-                content: "❌ There is no pending lock timer or stale warning for this thread.", 
-                ephemeral: true 
+            const reply = await interaction.reply({ 
+                embeds: [new EmbedBuilder().setTitle("♻️ Thread Renewed").setDescription("The 30-day inactivity timer has been reset.").setColor(0x10B981)],
+                fetchReply: true 
             });
+
+            logAction(interaction.guildId, 'THREAD_RENEWED', `Thread renewed: ${interaction.channel.name}`, userId, userName, userAvatar, '/cancel', interaction.channelId, reply.id);
+        } else {
+            return interaction.reply({ content: "❌ There is no pending lock timer or stale warning for this thread.", ephemeral: true });
         }
     }
 
@@ -2076,13 +2035,11 @@ client.on('interactionCreate', async (interaction) => {
         const isHelper = hasHelperRole(interaction.member, settings);
 
         if (!isAdmin && !isHelper) {
-            return interaction.reply({ 
-                content: "❌ **Access Denied:** You need a Command Helper Role or Administrator permissions.", 
-                ephemeral: true 
-            });
+            return interaction.reply({ content: "❌ **Access Denied**", ephemeral: true });
         }
 
-        const link = interaction.options.getRaw('link') || interaction.options.getString('link');
+        // FIX: Use getString instead of getRaw
+        const link = interaction.options.getString('link');
         
         try {
             await interaction.channel.setAppliedTags([settings.duplicate_tag]);
@@ -2095,20 +2052,10 @@ client.on('interactionCreate', async (interaction) => {
             const reply = await interaction.reply({ embeds: [duplicateEmbed], fetchReply: true });
             await interaction.channel.setLocked(true);
             
-            logAction(
-                interaction.guildId, 
-                'DUPLICATE', 
-                `Closed duplicate: ${interaction.channel.name}`,
-                userId, userName, userAvatar,
-                `/duplicate link:${link}`,
-                interaction.channelId,
-                reply.id
-            );
+            logAction(interaction.guildId, 'DUPLICATE', `Closed duplicate: ${interaction.channel.name}`, userId, userName, userAvatar, `/duplicate link:${link}`, interaction.channelId, reply.id);
         } catch (e) {
             console.error(e);
-            if (!interaction.replied) {
-                await interaction.reply({ content: "⚠️ Permission error.", ephemeral: true });
-            }
+            if (!interaction.replied) await interaction.reply({ content: "⚠️ Permission error.", ephemeral: true });
         }
     }
 
@@ -2148,7 +2095,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
             } catch (e) { /* silent fail on fields */ }
 
-            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`, null, null);
+            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`, interaction.channelId, null);
             
             return interaction.reply({ embeds: [embed] });
         } catch (error) {
