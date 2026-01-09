@@ -593,8 +593,10 @@ app.get('/', async (req, res) => {
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
-    const filterAction = req.query.action;
-    const filterGuild = req.query.guild;
+    const filterActions = [].concat(req.query.action || []);
+    const filterGuilds  = [].concat(req.query.guild || []);
+    const filterUsers   = [].concat(req.query.user || []);
+
     const managedGuildIds = getManagedGuilds(req.user.id);
 
     if (managedGuildIds.length === 0) {
@@ -604,15 +606,21 @@ app.get('/logs', async (req, res) => {
     let query = `SELECT * FROM audit_logs WHERE guild_id IN (${managedGuildIds.map(() => '?').join(',')})`;
     let params = [...managedGuildIds];
 
-    if (filterAction) {
-        query += " AND action = ?";
-        params.push(filterAction);
+    if (filterActions.length > 0) {
+    query += ` AND action IN (${filterActions.map(() => '?').join(',')})`;
+    params.push(...filterActions);
     }
     
-    if (filterGuild && managedGuildIds.includes(filterGuild)) {
-        query += " AND guild_id = ?";
-        params.push(filterGuild);
+    if (filterGuilds.length > 0) {
+    query += ` AND guild_id IN (${filterGuilds.map(() => '?').join(',')})`;
+    params.push(...filterGuilds);
     }
+
+    if (filterUsers.length > 0) {
+    query += ` AND user_id IN (${filterUsers.map(() => '?').join(',')})`;
+    params.push(...filterUsers);
+    }
+
 
     query += " ORDER BY timestamp DESC LIMIT 100";
 
@@ -656,46 +664,123 @@ app.get('/logs', async (req, res) => {
     <html>
     ${getHead('Impulse | Audit Logs')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
-        <div class="max-w-6xl mx-auto">
+        <div class="max-w-7xl mx-auto">
             ${getNav('logs', req.user)}
 
             <div class="mb-8">
-                <h1 class="text-3xl font-black text-white uppercase tracking-tighter mb-2">Audit <span class="text-[#FFAA00]">Logs</span></h1>
-                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">System event archive & activity monitoring</p>
+                <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
+                    Audit <span class="text-[#FFAA00]">Logs</span>
+                </h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">System • Security • Activity</p>
             </div>
 
-            <div class="space-y-6 mb-8">
-                <div>
-                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Action Type</p>
-                    <div class="flex flex-wrap gap-2">
-                        <a href="/logs${filterGuild ? `?guild=${filterGuild}` : ''}" 
-                           class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!filterAction ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                            All Actions
-                        </a>
-                        ${allActions.map(action => `
-                            <a href="/logs?action=${action}${filterGuild ? `&guild=${filterGuild}` : ''}" 
-                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filterAction === action ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                                ${action.replace(/_/g, ' ')}
+            <!-- FILTERS ────────────────────────────────────────────────────────── -->
+            <div class="bg-slate-900/50 backdrop-blur-md p-6 rounded-2xl border border-slate-800 mb-10 shadow-xl">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <!-- Action types -->
+                    <div>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Action Type</p>
+                        <div class="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                            <a href="/logs?${new URLSearchParams({ guild: filterGuilds, user: filterUsers }).toString()}"
+                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase ${filterActions.length === 0 ? 'bg-[#FFAA00] text-black shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'} transition-all border border-slate-700">
+                                All
                             </a>
-                        `).join('')}
+                            ${allActions.map(act => {
+                                const active = filterActions.includes(act);
+                                const params = new URLSearchParams();
+                                if (active) {
+                                    filterActions.filter(a => a !== act).forEach(a => params.append('action', a));
+                                } else {
+                                    filterActions.forEach(a => params.append('action', a));
+                                    params.append('action', act);
+                                }
+                                filterGuilds.forEach(g => params.append('guild', g));
+                                filterUsers.forEach(u => params.append('user', u));
+
+                                return `
+                                <a href="/logs?${params.toString()}"
+                                   class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${active ? 'bg-[#FFAA00] text-black shadow-md shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'} border border-slate-700">
+                                    ${act.replace(/_/g, ' ')}
+                                </a>`;
+                            }).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Guilds -->
+                    <div>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Server</p>
+                        <div class="flex flex-wrap gap-2">
+                            <a href="/logs?${new URLSearchParams({ action: filterActions, user: filterUsers }).toString()}"
+                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase ${filterGuilds.length === 0 ? 'bg-[#FFAA00] text-black shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'} transition-all border border-slate-700">
+                                All Servers
+                            </a>
+                            ${managedGuilds.map(g => {
+                                const active = filterGuilds.includes(g.id);
+                                const params = new URLSearchParams();
+                                if (active) {
+                                    filterGuilds.filter(id => id !== g.id).forEach(id => params.append('guild', id));
+                                } else {
+                                    filterGuilds.forEach(id => params.append('guild', id));
+                                    params.append('guild', g.id);
+                                }
+                                filterActions.forEach(a => params.append('action', a));
+                                filterUsers.forEach(u => params.append('user', u));
+
+                                return `
+                                <a href="/logs?${params.toString()}"
+                                   class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${active ? 'bg-[#FFAA00] text-black shadow-md shadow-amber-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'} border border-slate-700">
+                                    ${g.name}
+                                </a>`;
+                            }).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Users (NEW) -->
+                    <div>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">User</p>
+                        <div class="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                            <a href="/logs?${new URLSearchParams({ action: filterActions, guild: filterGuilds }).toString()}"
+                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase ${filterUsers.length === 0 ? 'bg-[#FFAA00] text-black shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'} transition-all border border-slate-700">
+                                All Users
+                            </a>
+                            ${userList.map(u => {
+                                const active = filterUsers.includes(u.user_id);
+                                const params = new URLSearchParams();
+                                if (active) {
+                                    filterUsers.filter(id => id !== u.user_id).forEach(id => params.append('user', id));
+                                } else {
+                                    filterUsers.forEach(id => params.append('user', id));
+                                    params.append('user', u.user_id);
+                                }
+                                filterActions.forEach(a => params.append('action', a));
+                                filterGuilds.forEach(g => params.append('guild', g));
+
+                                return `
+                                <a href="/logs?${params.toString()}"
+                                   class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${active ? 'bg-purple-600/80 text-white shadow-md shadow-purple-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'} border border-slate-700">
+                                    ${u.user_name}
+                                </a>`;
+                            }).join('')}
+                        </div>
                     </div>
                 </div>
 
-                <div>
-                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Server</p>
+                <!-- Current active filters summary -->
+                ${(filterActions.length + filterGuilds.length + filterUsers.length > 0) ? `
+                <div class="mt-6 pt-4 border-t border-slate-800">
+                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-2">Active filters:</p>
                     <div class="flex flex-wrap gap-2">
-                        <a href="/logs${filterAction ? `?action=${filterAction}` : ''}" 
-                           class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!filterGuild ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                            All Servers
-                        </a>
-                        ${managedGuilds.map(g => `
-                            <a href="/logs?guild=${g.id}${filterAction ? `&action=${filterAction}` : ''}" 
-                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filterGuild === g.id ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                                ${g.name}
-                            </a>
-                        `).join('')}
+                        ${filterActions.map(a => `<span class="px-2.5 py-1 bg-blue-950/60 text-blue-300 text-[10px] rounded border border-blue-900/50">${a.replace(/_/g,' ')}</span>`).join('')}
+                        ${filterGuilds.map(id => {
+                            const g = managedGuilds.find(g => g.id === id);
+                            return g ? `<span class="px-2.5 py-1 bg-amber-950/60 text-amber-300 text-[10px] rounded border border-amber-900/50">${g.name}</span>` : '';
+                        }).join('')}
+                        ${filterUsers.map(id => {
+                            const u = userList.find(u => u.user_id === id);
+                            return u ? `<span class="px-2.5 py-1 bg-purple-950/60 text-purple-300 text-[10px] rounded border border-purple-900/50">@${u.user_name}</span>` : '';
+                        }).join('')}
                     </div>
-                </div>
+                </div>` : ''}
             </div>
 
             <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
