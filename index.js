@@ -554,6 +554,9 @@ app.get('/', async (req, res) => {
                 </div>
             </footer>
         </div>
+        <div class="mt-6 text-center text-xs text-slate-600 font-mono">
+                Showing ${logs.length} ${logs.length === 1 ? 'entry' : 'entries'} • Last updated: ${new Date().toLocaleTimeString()}
+        </div>
         <script>
             function updateTimers() {
                 document.querySelectorAll('[data-expire]').forEach(el => {
@@ -573,26 +576,13 @@ app.get('/', async (req, res) => {
                 document.querySelectorAll('[data-timestamp]').forEach(el => {
                     const raw = el.getAttribute('data-timestamp');
                     if (!raw || raw === "null") return;
-
-                    // SQLite format is "YYYY-MM-DD HH:MM:SS"
-                    // We need to change it to "YYYY-MM-DDTHH:MM:SSZ" to force UTC parsing
                     const isoString = raw.replace(' ', 'T') + 'Z';
                     const date = new Date(isoString);
-
-                    // If the date is invalid, stop
                     if (isNaN(date.getTime())) return;
-
-                    // Use the browser's local settings for a perfect match to the user's clock
-                    const formatted = date.toLocaleString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true
+                    el.innerText = date.toLocaleString(undefined, {
+                        month: 'short', day: 'numeric', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit', hour12: true
                     });
-
-                    el.innerText = formatted;
                 });
             }
             
@@ -608,10 +598,22 @@ app.get('/logs', async (req, res) => {
 
     const filterAction = req.query.action;
     const filterGuild = req.query.guild;
-    const managedGuildIds = getManagedGuilds(req.user.id);
+    const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
+    const managedGuildIds = [];
 
-    if (managedGuildIds.length === 0) {
-        return res.send(getErrorPage("No Access", "You don't have permission to view logs from any servers."));
+    for (const settings of allSettings) {
+        const guild = client.guilds.cache.get(settings.guild_id);
+        if (!guild) continue;
+        try {
+            const member = await guild.members.fetch(req.user.id);
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
+                managedGuildIds.push(settings.guild_id);
+            }
+        } catch (e) {}
+    }
+
+     if (managedGuildIds.length === 0) {
+        return res.send(getErrorPage("No Access", "You don't have permission to view logs."));
     }
 
     let query = `SELECT * FROM audit_logs WHERE guild_id IN (${managedGuildIds.map(() => '?').join(',')})`;
