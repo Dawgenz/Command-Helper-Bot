@@ -1369,105 +1369,124 @@ app.get("/threads", async (req, res) => {
 });
 
 app.get("/invite", (req, res) => {
-  // Calculated Permission Integer: 312680377408
-  // Includes: View Channels, Send Messages, Manage Messages, Embed Links, Read Message History,
-  // Add Reactions, Use External Emojis, Manage Threads, Send Messages in Threads.
-  const permissions = "312680377408";
-  const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`;
+  // Minimal required permissions integer: 274909764608
+  const permissions = "274909764608";
+  const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands&guild_id=&disable_guild_select=true`;
 
-  const botAvatar = client.user.displayAvatarURL();
+  const botAvatar = client.user?.displayAvatarURL() || '';
 
   res.send(`
     <html>
-    ${getHead("Impulse | System Authorization")}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6">
-        <div class="max-w-3xl w-full">
-            <!-- Terminal Header -->
-            <div class="text-center mb-10">
-                <div class="inline-block p-1 rounded-full bg-gradient-to-tr from-[#FFAA00] to-amber-300 shadow-[0_0_30px_rgba(255,170,0,0.3)] mb-6">
-                    <img src="${botAvatar}" class="w-24 h-24 rounded-full border-4 border-[#0b0f1a]">
+    ${getHead("Impulse OS | Authorization Protocol")}
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6 overflow-hidden relative">
+        <!-- Background Glow -->
+        <div class="absolute inset-0 opacity-30 pointer-events-none">
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-[#FFAA00] rounded-full blur-[120px] animate-pulse"></div>
+        </div>
+
+        <div class="max-w-5xl w-full relative z-10">
+            <!-- Hero Header -->
+            <div class="text-center mb-12">
+                <div class="inline-block relative mb-8">
+                    <div class="absolute inset-0 bg-[#FFAA00] blur-xl opacity-40 rounded-full animate-pulse"></div>
+                    <img src="${botAvatar}" class="w-32 h-32 rounded-full border-4 border-[#FFAA00] shadow-2xl relative z-10">
                 </div>
-                <h1 class="text-5xl font-black tracking-tighter text-white uppercase italic">Impulse<span class="text-[#FFAA00] not-italic">OS</span></h1>
-                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-[0.5em] mt-2">Advanced Forum Management Protocol</p>
+                <h1 class="text-6xl md:text-7xl font-black tracking-tighter uppercase bg-gradient-to-r from-white to-[#FFAA00] bg-clip-text text-transparent">
+                    Impulse<span class="text-[#FFAA00]">OS</span>
+                </h1>
+                <p class="text-lg font-bold text-[#FFAA00] uppercase tracking-[0.4em] mt-4">Next-Gen Forum Automation</p>
+                <p class="text-slate-400 max-w-2xl mx-auto mt-6 leading-relaxed">Precision thread management • Reusable resource snippets • Secure link delivery • Full audit dashboard</p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <!-- Feature List -->
-                <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
-                    <h3 class="text-[#FFAA00] text-xs font-black uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <span class="w-2 h-2 bg-[#FFAA00] rounded-full animate-ping"></span>
-                        System Modules
-                    </h3>
-                    <ul class="space-y-4">
-                        <li class="flex gap-3 items-start">
-                            <svg class="w-5 h-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            <div>
-                                <p class="text-xs font-bold text-white uppercase">Automated Greeting</p>
-                                <p class="text-[10px] text-slate-500">Instant welcome embeds for new forum threads with customizable variables.</p>
-                            </div>
-                        </li>
-                        <li class="flex gap-3 items-start">
-                            <svg class="w-5 h-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            <div>
-                                <p class="text-xs font-bold text-white uppercase">Stale Thread Sweep</p>
-                                <p class="text-[10px] text-slate-500">Automatic 24-day warnings and 30-day locks for inactive technical threads.</p>
-                            </div>
-                        </li>
-                        <li class="flex gap-3 items-start">
-                            <svg class="w-5 h-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            <div>
-                                <p class="text-xs font-bold text-white uppercase">Link Distribution</p>
-                                <p class="text-[10px] text-slate-500">Securely deliver links to users via DM using the 🔗 reaction system.</p>
-                            </div>
-                        </li>
+            <!-- Features Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+                <div class="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-8 hover:border-[#FFAA00]/50 transition-all group">
+                    <div class="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <svg class="w-7 h-7 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    </div>
+                    <h3 class="text-lg font-black uppercase text-white mb-3">Smart Automation</h3>
+                    <ul class="space-y-3 text-sm text-slate-400">
+                        <li>• Instant greeting embeds on thread creation</li>
+                        <li>• Auto "unanswered" tagging</li>
+                        <li>• 24-day stale warnings → 30-day auto-lock</li>
+                        <li>• /resolved → tag + 30min timed lock</li>
+                        <li>• /cancel to undo or renew</li>
                     </ul>
                 </div>
 
-                <!-- Permission Transparency -->
-                <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
-                    <h3 class="text-blue-400 text-xs font-black uppercase tracking-widest mb-4">Security Credentials</h3>
-                    <div class="space-y-2">
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Manage Threads</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Manage Messages</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Embed Links</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Add Reactions</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
+                <div class="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-8 hover:border-[#FFAA00]/50 transition-all group">
+                    <div class="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <svg class="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                     </div>
-                    <div class="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                        <p class="text-[9px] text-blue-300 leading-relaxed italic">
-                            Impulse OS requires 'Manage Messages' specifically to remove user reactions after delivering links, keeping your thread UI clean.
-                        </p>
+                    <h3 class="text-lg font-black uppercase text-white mb-3">Resource Snippets</h3>
+                    <ul class="space-y-3 text-sm text-slate-400">
+                        <li>• Create rich reusable embeds via dashboard</li>
+                        <li>• Supports variables {user}, {server}, images, thumbnails</li>
+                        <li>• Instant access with /snippet &lt;name&gt;</li>
+                        <li>• Perfect for FAQs, guides, common fixes</li>
+                    </ul>
+                </div>
+
+                <div class="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-8 hover:border-[#FFAA00]/50 transition-all group">
+                    <div class="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <svg class="w-7 h-7 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                     </div>
+                    <h3 class="text-lg font-black uppercase text-white mb-3">Secure Link System</h3>
+                    <ul class="space-y-3 text-sm text-slate-400">
+                        <li>• Thread owners attach private links (/link)</li>
+                        <li>• Users react 🔗 on starter message → get DM</li>
+                        <li>• Bot auto-removes reaction for clean UI</li>
+                        <li>• Staff can remove with /removelink</li>
+                    </ul>
                 </div>
             </div>
 
-            <!-- CTA Section -->
-            <div class="bg-[#FFAA00] rounded-2xl p-1 shadow-[0_0_50px_rgba(255,170,0,0.15)]">
-                <a href="${inviteUrl}" target="_blank" class="block w-full bg-[#0b0f1a] hover:bg-transparent text-[#FFAA00] hover:text-black py-5 rounded-[14px] text-center transition-all group">
-                    <span class="text-sm font-black uppercase tracking-[0.3em]">Authorize Connection</span>
-                </a>
+            <!-- Permissions & Privacy -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+                <div class="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-8">
+                    <h3 class="text-[#FFAA00] font-black uppercase tracking-widest mb-6">Required Permissions</h3>
+                    <p class="text-sm text-slate-400 mb-6">Minimal & transparent — no Administrator access needed.</p>
+                    <ul class="space-y-4 text-sm">
+                        <li class="flex justify-between"><span class="text-slate-400">Manage Threads</span><span class="text-emerald-400 font-bold">Essential</span></li>
+                        <li class="flex justify-between"><span class="text-slate-400">Manage Messages</span><span class="text-emerald-400 font-bold">Essential</span></li>
+                        <li class="flex justify-between"><span class="text-slate-400">Embed Links & Send in Threads</span><span class="text-emerald-400 font-bold">Essential</span></li>
+                        <li class="flex justify-between"><span class="text-slate-400">Add Reactions</span><span class="text-emerald-400 font-bold">Essential</span></li>
+                    </ul>
+                    <p class="text-[10px] text-slate-500 mt-6 italic">Manage Messages is used only to cleanly remove 🔗 reactions after DM delivery.</p>
+                </div>
+
+                <div class="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-8">
+                    <h3 class="text-cyan-400 font-black uppercase tracking-widest mb-6">Privacy & Security</h3>
+                    <ul class="space-y-4 text-sm text-slate-400">
+                        <li>• No personal data stored — OAuth only verifies role access</li>
+                        <li>• Dashboard data loaded real-time, nothing cached</li>
+                        <li>• Full audit logs for all bot actions</li>
+                        <li>• Open-source friendly — self-hostable</li>
+                    </ul>
+                </div>
             </div>
 
-            <div class="mt-8 flex justify-center gap-8">
-                <a href="/" class="text-[10px] font-bold text-slate-600 hover:text-[#FFAA00] uppercase tracking-widest transition-colors">← Return to Terminal</a>
-                <span class="text-slate-800">|</span>
-                <p class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Version 2.4.0 (Stable)</p>
+            <!-- CTA -->
+            <div class="text-center mb-10">
+                <a href="${inviteUrl}" target="_blank" class="inline-block bg-gradient-to-r from-[#FFAA00] to-amber-400 text-black px-16 py-6 rounded-2xl font-black text-2xl uppercase tracking-widest shadow-2xl hover:shadow-[#FFAA00]/50 hover:scale-105 transition-all">
+                    Deploy Impulse OS
+                </a>
+                <p class="text-slate-500 text-sm mt-6 uppercase tracking-wider">One-click authorization • Instant setup with /setup</p>
+            </div>
+
+            <!-- Footer Links -->
+            <div class="text-center text-[10px] font-bold text-slate-600 uppercase tracking-widest space-y-2">
+                <p>Dashboard: <a href="https://impulse.gztexh.com" class="text-[#FFAA00] hover:underline">impulse.gztexh.com</a></p>
+                <div class="flex items-center justify-center gap-6">
+                    <a href="/" class="hover:text-[#FFAA00] transition-colors">← Terminal Access</a>
+                    <span>•</span>
+                    <span>Version 2.4.0 • Stable Release</span>
+                </div>
             </div>
         </div>
     </body>
     </html>
-    `);
+  `);
 });
 
 app.get("/snippets", async (req, res) => {
