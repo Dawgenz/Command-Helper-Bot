@@ -660,6 +660,14 @@ app.get('/logs', async (req, res) => {
         return { id, name: guild ? guild.name : `Server ${id.slice(-4)}` };
     });
 
+    const userList = db.prepare(`
+    SELECT DISTINCT user_id, user_name 
+    FROM audit_logs 
+    WHERE guild_id IN (${managedGuildIds.map(() => '?').join(',')}) 
+    AND user_id IS NOT NULL
+    ORDER BY user_name ASC
+`).all(...managedGuildIds);
+
     res.send(`
     <html>
     ${getHead('Impulse | Audit Logs')}
