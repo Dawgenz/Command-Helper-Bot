@@ -179,7 +179,7 @@ function parseVars(text, interaction = null) {
     
     processed = processed.replace(/{br}/g, '\n');
     
-    return processed.length > 4000 ? processed.substring(0, 4000) + "..." : processed;
+    return processed.length > 4000 ? processed.substring(0, 4000) + "..." : processed.replace(/{br}/g, '\n');
 }
 
 function getErrorPage(title, message, code = "403") {
@@ -568,15 +568,17 @@ app.get('/', async (req, res) => {
             function updateTimestamps() {
                 document.querySelectorAll('[data-timestamp]').forEach(el => {
                     const timestamp = el.getAttribute('data-timestamp');
-                    const date = new Date(timestamp + 'Z');
-                    const timeStr = date.toLocaleTimeString('en-US', {
+                    // If the DB date doesn't have a 'Z', browser might think it's local. 
+                    // We force it to UTC by adding 'Z' if it's missing, then the browser converts to local.
+                    const date = new Date(timestamp.includes(' ') ? timestamp.replace(' ', 'T') + 'Z' : timestamp);
+                    
+                    const timeStr = date.toLocaleString(undefined, {
                         month: '2-digit',
                         day: '2-digit',
                         hour: '2-digit',
                         minute: '2-digit',
-                        second: '2-digit',
-                        hour12: false
-                    }).replace(',', '');
+                        hour12: true
+                    });
                     el.innerText = timeStr;
                 });
             }
@@ -1251,6 +1253,16 @@ app.get('/snippets/new', (req, res) => {
                     <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-[#FFC040] transition-all">
                         Create Snippet
                     </button>
+
+                    <div class="flex gap-4">
+                        <button type="submit" class="flex-1 bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-[#FFC040] transition-all">
+                            Save Snippet
+                        </button>
+                        <a href="/snippets" class="flex-1 bg-slate-800 text-slate-400 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest text-center hover:bg-slate-700 transition-all border border-slate-700">
+                            Cancel
+                        </a>
+                    </div>
+
                 </form>
 
                 <div class="sticky top-6">
@@ -1305,11 +1317,18 @@ app.get('/snippets/new', (req, res) => {
             // Simulated variable replacement for the dashboard preview
             function simulateVars(text) {
                 if (!text) return "";
-                return text
+                let p = text
+                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") // Escape HTML
                     .replace(/{user}/g, '<span class="text-[#5865F2] hover:underline cursor-pointer">@${req.user.username}</span>')
                     .replace(/{server}/g, '<strong>Impulse OS</strong>')
                     .replace(/{channel}/g, '<span class="text-[#5865F2] hover:underline cursor-pointer">#general</span>')
-                    .replace(/{br}/g, '<br>');
+                    .replace(/{br}/g, '<br>')
+                    // Discord Markdown Simulation
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>') // Italics
+                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="#" class="text-[#00a8fc] hover:underline">$1</a>'); // Links
+
+                return p;
             }
 
             function updatePreview() {
