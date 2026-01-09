@@ -2019,8 +2019,8 @@ client.on('interactionCreate', async (interaction) => {
                 userName,
                 userAvatar,
                 '/cancel',
-                threadId,
-                messageId
+                null,
+                null
             );
             
             const cancelEmbed = new EmbedBuilder()
