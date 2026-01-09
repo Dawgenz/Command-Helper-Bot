@@ -644,7 +644,7 @@ app.get('/logs', async (req, res) => {
         'SNIPPET_CREATE', 'SNIPPET_UPDATE', 'SNIPPET_DELETE', 'SNIPPET',
         'LOCK', 'CANCEL', 'GREET', 'DUPLICATE', 'SETUP', 'RESOLVED',
         'ANSWERED', 'AUTO_CLOSE', 'STALE_WARNING', 'THREAD_RENEWED',
-        'LINK_ADDED', 'LINK_ACCESSED'
+        'LINK_ADDED', 'LINK_ACCESSED', 'LINK_REMOVED'
     ];
     
     const managedGuilds = managedGuildIds.map(id => {
@@ -713,7 +713,13 @@ app.get('/logs', async (req, res) => {
                         </thead>
                         <tbody class="divide-y divide-slate-800/40">
                             ${logs.length > 0 ? logs.map(l => {
-                                const date = new Date(l.timestamp);
+                                // Force SQLite UTC → browser local time
+                                const iso = l.timestamp.includes(' ')
+                                    ? l.timestamp.replace(' ', 'T') + 'Z'
+                                    : l.timestamp;
+
+                                const date = new Date(iso);
+
                                 const formattedDate = date.toLocaleDateString('en-US', { 
                                     month: 'short', 
                                     day: 'numeric',
