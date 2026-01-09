@@ -1369,7 +1369,6 @@ app.get("/threads", async (req, res) => {
 });
 
 app.get("/invite", (req, res) => {
-  // Minimal required permissions integer: 274909764608
   const permissions = "274909764608";
   const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands&guild_id=&disable_guild_select=true`;
 
@@ -1378,28 +1377,28 @@ app.get("/invite", (req, res) => {
   res.send(`
     <html>
     ${getHead("Impulse OS | Authorization Protocol")}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6 overflow-hidden relative">
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen py-12 px-6 overflow-x-hidden relative">
         <!-- Background Glow -->
         <div class="absolute inset-0 opacity-30 pointer-events-none">
             <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-[#FFAA00] rounded-full blur-[120px] animate-pulse"></div>
         </div>
 
-        <div class="max-w-5xl w-full relative z-10">
+        <div class="max-w-5xl mx-auto w-full relative z-10">
             <!-- Hero Header -->
-            <div class="text-center mb-12">
+            <div class="text-center mb-16">
                 <div class="inline-block relative mb-8">
                     <div class="absolute inset-0 bg-[#FFAA00] blur-xl opacity-40 rounded-full animate-pulse"></div>
                     <img src="${botAvatar}" class="w-32 h-32 rounded-full border-4 border-[#FFAA00] shadow-2xl relative z-10">
                 </div>
-                <h1 class="text-6xl md:text-7xl font-black tracking-tighter uppercase bg-gradient-to-r from-white to-[#FFAA00] bg-clip-text text-transparent">
+                <h1 class="text-5xl md:text-7xl font-black tracking-tighter uppercase bg-gradient-to-r from-white to-[#FFAA00] bg-clip-text text-transparent">
                     Impulse<span class="text-[#FFAA00]">OS</span>
                 </h1>
-                <p class="text-lg font-bold text-[#FFAA00] uppercase tracking-[0.4em] mt-4">Next-Gen Forum Automation</p>
-                <p class="text-slate-400 max-w-2xl mx-auto mt-6 leading-relaxed">Precision thread management • Reusable resource snippets • Secure link delivery • Full audit dashboard</p>
+                <p class="text-base md:text-lg font-bold text-[#FFAA00] uppercase tracking-[0.4em] mt-4">Next-Gen Forum Automation</p>
+                <p class="text-slate-400 max-w-2xl mx-auto mt-6 leading-relaxed text-sm md:text-base">Precision thread management • Reusable resource snippets • Secure link delivery • Full audit dashboard</p>
             </div>
 
             <!-- Features Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
                 <div class="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-8 hover:border-[#FFAA00]/50 transition-all group">
                     <div class="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                         <svg class="w-7 h-7 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
@@ -1442,7 +1441,7 @@ app.get("/invite", (req, res) => {
             </div>
 
             <!-- Permissions & Privacy -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16">
                 <div class="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-8">
                     <h3 class="text-[#FFAA00] font-black uppercase tracking-widest mb-6">Required Permissions</h3>
                     <p class="text-sm text-slate-400 mb-6">Minimal & transparent — no Administrator access needed.</p>
@@ -1467,7 +1466,7 @@ app.get("/invite", (req, res) => {
             </div>
 
             <!-- CTA -->
-            <div class="text-center mb-10">
+            <div class="text-center mb-16">
                 <a href="${inviteUrl}" target="_blank" class="inline-block bg-gradient-to-r from-[#FFAA00] to-amber-400 text-black px-16 py-6 rounded-2xl font-black text-2xl uppercase tracking-widest shadow-2xl hover:shadow-[#FFAA00]/50 hover:scale-105 transition-all">
                     Deploy Impulse OS
                 </a>
@@ -1475,7 +1474,7 @@ app.get("/invite", (req, res) => {
             </div>
 
             <!-- Footer Links -->
-            <div class="text-center text-[10px] font-bold text-slate-600 uppercase tracking-widest space-y-2">
+            <div class="text-center text-[10px] font-bold text-slate-600 uppercase tracking-widest space-y-2 pb-8">
                 <p>Dashboard: <a href="https://impulse.gztexh.com" class="text-[#FFAA00] hover:underline">impulse.gztexh.com</a></p>
                 <div class="flex items-center justify-center gap-6">
                     <a href="/" class="hover:text-[#FFAA00] transition-colors">← Terminal Access</a>
