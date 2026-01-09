@@ -15,8 +15,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessageReactions, // Added for the link reaction
-        GatewayIntentBits.DirectMessages         // Added for DMing the link
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.DirectMessages
     ],
     partials: [
         Partials.Message, 
@@ -24,6 +24,8 @@ const client = new Client({
         Partials.User
     ]
 });
+
+// --- DATABASE INITIALIZATION ---
 db.prepare(`CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id TEXT PRIMARY KEY,
     guild_name TEXT,
@@ -53,7 +55,9 @@ db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (
     user_name TEXT,
     user_avatar TEXT,
     command_used TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    thread_id TEXT,
+    message_id TEXT
 )`).run();
 
 db.prepare(`
@@ -70,6 +74,9 @@ CREATE TABLE IF NOT EXISTS snippets (
     created_by TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    url TEXT,
+    image_url TEXT,
+    thumbnail_url TEXT,
     UNIQUE(guild_id, name)
 )
 `).run();
@@ -82,35 +89,12 @@ db.prepare(`CREATE TABLE IF NOT EXISTS thread_links (
     created_at INTEGER
 )`).run();
 
-try {
-    db.prepare(`ALTER TABLE snippets ADD COLUMN url TEXT`).run();
-    db.prepare(`ALTER TABLE snippets ADD COLUMN image_url TEXT`).run();
-    db.prepare(`ALTER TABLE snippets ADD COLUMN thumbnail_url TEXT`).run();
-} catch (e) {
-    // Columns already exist
-}
-
-try {
-    db.prepare(`ALTER TABLE audit_logs ADD COLUMN thread_id TEXT`).run();
-    db.prepare(`ALTER TABLE audit_logs ADD COLUMN message_id TEXT`).run();
-} catch (e) { /* Columns exist */ }
-
-try {
-    db.prepare(`ALTER TABLE guild_settings ADD COLUMN unanswered_tag TEXT`).run();
-} catch (e) { /* Column exists */ }
-
-try {
-    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN stale_warning_sent INTEGER DEFAULT 0`).run();
-    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN last_renewed_at INTEGER`).run();
-} catch (e) { /* Columns exist */ }
-
 // --- HELPERS ---
 const getSettings = (guildId) => db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId);
 
 function getNav(activePage, user) {
     const current = activePage === 'home' ? 'overview' : activePage;
     const pages = ['overview', 'snippets', 'threads', 'logs'];
-    
     const profileSection = user ? `
         <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 shadow-xl">
             <div class="text-right hidden sm:block">
@@ -118,8 +102,7 @@ function getNav(activePage, user) {
                 <a href="/logout" class="text-[8px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Terminate Session</a>
             </div>
             <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" class="w-8 h-8 rounded-full border-2 border-[#FFAA00]">
-        </div>
-    ` : '';
+        </div>` : '';
 
     return `
     <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
@@ -130,7 +113,6 @@ function getNav(activePage, user) {
                 <p class="text-[8px] font-bold text-[#FFAA00] uppercase tracking-[0.3em]">Bot Dashboard</p>
             </div>
         </div>
-
         <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-md">
             ${pages.map(p => `
                 <a href="/${p === 'overview' ? '' : p}" 
@@ -139,28 +121,18 @@ function getNav(activePage, user) {
                 </a>
             `).join('')}
         </div>
-
         ${profileSection}
-    </nav>
-    `;
+    </nav>`;
 }
 
 const logAction = (guildId, action, details, userId = null, userName = null, userAvatar = null, command = null, threadId = null, messageId = null) => {
     db.prepare('INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used, thread_id, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-        guildId, 
-        action, 
-        details, 
-        userId, 
-        userName, 
-        userAvatar, 
-        command,
-        threadId,
-        messageId
+        guildId, action, details, userId, userName, userAvatar, command, threadId, messageId
     );
 };
 
 function hasHelperRole(member, settings) {
-    if (!settings.helper_role_id) return false;
+    if (!settings || !settings.helper_role_id) return false;
     const roleIDs = settings.helper_role_id.split(',').map(id => id.trim());
     return member.roles.cache.some(role => roleIDs.includes(role.id));
 }
@@ -168,7 +140,6 @@ function hasHelperRole(member, settings) {
 function parseVars(text, interaction = null) {
     if (!text || text === "null") return "";
     let processed = String(text); 
-    
     if (interaction) {
         processed = processed
             .replace(/{user}/g, interaction.user.toString())
@@ -176,101 +147,25 @@ function parseVars(text, interaction = null) {
             .replace(/{server}/g, interaction.guild.name)
             .replace(/{channel}/g, interaction.channel.toString());
     }
-    
     processed = processed.replace(/{br}/g, '\n');
-    
-    // Safety check for Discord limits (4096 is the limit for descriptions)
-    if (processed.length > 4000) {
-        return processed.substring(0, 4000) + "...";
-    }
-    return processed;
+    return processed.length > 4000 ? processed.substring(0, 4000) + "..." : processed;
 }
 
 function getErrorPage(title, message, code = "403") {
-    return `
-    <html>
-    ${getHead('Impulse | ' + title)}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6">
-        <div class="max-w-md w-full text-center space-y-6">
-            <div class="relative">
-                <h1 class="text-9xl font-black text-white/5 tracking-tighter select-none">${code}</h1>
-                <div class="absolute inset-0 flex items-center justify-center">
-                    <div class="w-16 h-16 bg-[#FFAA00]/20 rounded-full flex items-center justify-center border border-[#FFAA00]/50 animate-pulse">
-                        <svg class="w-8 h-8 text-[#FFAA00]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                        </svg>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="space-y-2">
-                <h2 class="text-2xl font-black text-white uppercase tracking-tight">${title}</h2>
-                <p class="text-slate-500 text-sm font-medium leading-relaxed">${message}</p>
-            </div>
-
-            <div class="pt-4">
-                <a href="/" class="inline-block bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-xl border border-slate-800 text-xs font-black uppercase tracking-widest transition-all">
-                    Return to Dashboard
-                </a>
-            </div>
-        </div>
-    </body>
-    </html>
-    `;
+    return `<html>${getHead('Impulse | ' + title)}<body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6"><div class="max-w-md w-full text-center space-y-6"><h1 class="text-9xl font-black text-white/5 tracking-tighter">${code}</h1><h2 class="text-2xl font-black text-white uppercase">${title}</h2><p class="text-slate-500">${message}</p><a href="/" class="inline-block bg-slate-900 text-white px-8 py-3 rounded-xl border border-slate-800 text-xs font-black uppercase">Return Dashboard</a></div></body></html>`;
 }
 
 function getDiscordLink(guildId, channelId, messageId = null) {
-    if (messageId) {
-        return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
-    }
-    return `https://discord.com/channels/${guildId}/${channelId}`;
+    return messageId ? `https://discord.com/channels/${guildId}/${channelId}/${messageId}` : `https://discord.com/channels/${guildId}/${channelId}`;
 }
 
 function getReadableName(channelId, guildId) {
-    try {
-        const guild = client.guilds.cache.get(guildId);
-        if (!guild) return `Channel ${channelId.slice(-4)}`;
-        
-        const channel = guild.channels.cache.get(channelId);
-        if (!channel) return `Channel ${channelId.slice(-4)}`;
-        
-        return channel.name;
-    } catch (e) {
-        return `Channel ${channelId.slice(-4)}`;
-    }
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) return `Channel ${channelId.slice(-4)}`;
+    const channel = guild.channels.cache.get(channelId);
+    return channel ? channel.name : `Channel ${channelId.slice(-4)}`;
 }
 
-// --- PASSPORT / OAUTH2 CONFIG ---
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
-
-passport.use(new Strategy({
-    clientID: process.env.CLIENT_ID,
-    clientSecret: process.env.CLIENT_SECRET,
-    callbackURL: process.env.REDIRECT_URI,
-    scope: ['identify', 'guilds', 'guilds.members.read']
-}, (accessToken, refreshToken, profile, done) => {
-    process.nextTick(() => done(null, profile));
-}));
-
-app.use(session({
-    store: new SQLiteStore({ db: 'database.db', table: 'sessions', dir: './' }),
-    secret: process.env.SESSION_SECRET || 'keyboard cat',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
-}));
-app.use(passport.initialize());
-app.use(passport.session());
-
-// --- ROUTES ---
-app.get('/auth/discord', passport.authenticate('discord'));
-app.get('/auth/discord/callback', passport.authenticate('discord', { failureRedirect: '/' }), (req, res) => res.redirect('/'));
-app.get('/logout', (req, res) => {
-    req.logout(() => res.redirect('/'));
-});
-
-// HELPER: Shared Header/Favicon HTML
 const getHead = (title) => `
     <head>
         <meta charset="UTF-8">
@@ -282,28 +177,16 @@ const getHead = (title) => `
             @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=JetBrains+Mono&display=swap');
             body { font-family: 'Space Grotesk', sans-serif; }
             .mono { font-family: 'JetBrains Mono', monospace; }
-            .glow-amber { box-shadow: 0 0 20px rgba(255, 170, 0, 0.15); }
-            .border-amber { border-color: rgba(255, 170, 0, 0.3); }
-            ::-webkit-scrollbar { width: 8px; }
-            ::-webkit-scrollbar-track { background: #0b0f1a; }
-            ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-            ::-webkit-scrollbar-thumb:hover { background: #FFAA00; }
-            .no-scrollbar::-webkit-scrollbar { display: none; }
         </style>
-    </head>
-`;
+    </head>`;
 
 async function canManageSnippet(req, guild_id) {
     try {
-        let guild = client.guilds.cache.get(guild_id);
-        if (!guild) guild = await client.guilds.fetch(guild_id);
-        
+        let guild = client.guilds.cache.get(guild_id) || await client.guilds.fetch(guild_id);
         const member = await guild.members.fetch(req.user.id);
         const settings = getSettings(guild_id);
         return member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings);
-    } catch (e) {
-        return false;
-    }
+    } catch (e) { return false; }
 }
 
 const getActionColor = (action) => {
@@ -311,7 +194,6 @@ const getActionColor = (action) => {
         'SNIPPET_CREATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'SNIPPET_UPDATE': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'SNIPPET_DELETE': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
-        'SNIPPET': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         'LOCK': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
         'CANCEL': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
         'GREET': 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
@@ -329,233 +211,88 @@ const getActionColor = (action) => {
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
 
-function getManagedGuilds(userId) {
-    return client.guilds.cache.filter(guild => {
-        const member = guild.members.cache.get(userId);
-        if (!member) return false;
-        
-        const settings = getSettings(guild.id);
-        const isHandler = hasHelperRole(member, settings);
-        const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
-        
-        return isHandler || isAdmin;
-    }).map(guild => guild.id);
-}
+// --- PASSPORT / OAUTH2 ---
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((obj, done) => done(null, obj));
+passport.use(new Strategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: process.env.REDIRECT_URI,
+    scope: ['identify', 'guilds', 'guilds.members.read']
+}, (accessToken, refreshToken, profile, done) => done(null, profile)));
+
+app.use(session({
+    store: new SQLiteStore({ db: 'database.db', table: 'sessions', dir: './' }),
+    secret: process.env.SESSION_SECRET || 'keyboard cat',
+    resave: false, saveUninitialized: false,
+    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+
+// --- WEB ROUTES ---
+app.get('/auth/discord', passport.authenticate('discord'));
+app.get('/auth/discord/callback', passport.authenticate('discord', { failureRedirect: '/' }), (req, res) => res.redirect('/'));
+app.get('/logout', (req, res) => req.logout(() => res.redirect('/')));
 
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
-        return res.send(`
-        <html>
-        ${getHead('Impulse | Terminal Access')}
-        <body class="bg-[#0b0f1a] text-white flex items-center justify-center min-h-screen p-6">
-            <div class="max-w-md w-full">
-                <div class="text-center mb-8">
-                    <div class="inline-block p-4 rounded-full bg-[#FFAA00]/10 border-2 border-[#FFAA00] shadow-[0_0_20px_rgba(255,170,0,0.3)] mb-4 animate-pulse">
-                        <img src="${client.user.displayAvatarURL()}" class="w-16 h-16 rounded-full">
-                    </div>
-                    <h1 class="text-4xl font-black tracking-tighter text-white uppercase">Impulse <span class="text-[#FFAA00]">OS</span></h1>
-                    <p class="text-slate-500 text-[10px] mt-2 uppercase tracking-[0.2em]">Improving Quality of Life and More!</p>
-                </div>
-                
-                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl backdrop-blur-md relative overflow-hidden">
-                    <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#FFAA00] to-transparent opacity-20"></div>
-                    
-                    <div class="space-y-4 mb-8">
-                        <div class="flex items-start gap-3">
-                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00] shrink-0"></div>
-                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">STATUS:</span> System online. Monitoring 24/7 forum threads and community health.</p>
-                        </div>
-                        <div class="flex items-start gap-3">
-                            <div class="mt-1 w-2 h-2 rounded-full bg-[#FFAA00] shrink-0"></div>
-                            <p class="text-xs text-slate-400 font-mono"><span class="text-[#FFAA00]">SECURE:</span> OAuth2 Protocol active. Impulse Bot Dashboard requires Admin or Command Helper clearance.</p>
-                        </div>
-                    </div>
-
-                    <div class="space-y-3">
-                        <a href="/auth/discord" class="w-full text-center bg-[#FFAA00] hover:bg-[#ffbb33] text-black py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(255,170,0,0.2)] block">
-                            Establish Connection
-                        </a>
-                        
-                        <a href="/invite" class="w-full text-center bg-slate-800 hover:bg-slate-700 text-[#FFAA00] py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all border-2 border-[#FFAA00]/30 hover:border-[#FFAA00] block flex items-center justify-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                            </svg>
-                            Add Bot to Server
-                        </a>
-                    </div>
-                    
-                    <p class="text-[9px] text-center text-slate-600 mt-6 uppercase tracking-widest italic font-bold">Authorized personnel only</p>
-                </div>
-            </div>
-        </body></html>`);
+        return res.send(`<html>${getHead('Impulse | Access')} <body class="bg-[#0b0f1a] text-white flex items-center justify-center min-h-screen p-6"><div class="max-w-md w-full text-center"><h1 class="text-4xl font-black mb-4">Impulse <span class="text-[#FFAA00]">OS</span></h1><a href="/auth/discord" class="bg-[#FFAA00] text-black px-8 py-4 rounded-xl font-black uppercase block">Establish Connection</a></div></body></html>`);
     }
 
-    const botAvatar = client.user.displayAvatarURL();
-    const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
     const authorizedGuilds = [];
-
-    for (const settings of allSettings) {
-        const guild = client.guilds.cache.get(settings.guild_id);
+    const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
+    for (const s of allSettings) {
+        const guild = client.guilds.cache.get(s.guild_id);
         if (!guild) continue;
         try {
             const member = await guild.members.fetch(req.user.id);
-            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
-                const timers = db.prepare('SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?').all(settings.guild_id);
-                const snippetCount = db.prepare('SELECT COUNT(*) as count FROM snippets WHERE guild_id = ?').get(settings.guild_id).count;
-                authorizedGuilds.push({ ...settings, timers, snippetCount });
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, s)) {
+                const timers = db.prepare('SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?').all(s.guild_id);
+                const snippetCount = db.prepare('SELECT COUNT(*) as count FROM snippets WHERE guild_id = ?').get(s.guild_id).count;
+                authorizedGuilds.push({ ...s, timers, snippetCount });
             }
         } catch (e) {}
     }
 
-    const recentLogs = db.prepare(`
-        SELECT audit_logs.*, guild_settings.guild_name 
-        FROM audit_logs 
-        LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
-        ORDER BY timestamp DESC LIMIT 5
-    `).all();
-
+    const recentLogs = db.prepare(`SELECT audit_logs.*, guild_settings.guild_name FROM audit_logs LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id ORDER BY timestamp DESC LIMIT 5`).all();
     const totalSnippets = db.prepare('SELECT COUNT(*) as count FROM snippets').get().count;
     const totalLocks = db.prepare('SELECT COUNT(*) as count FROM pending_locks').get().count;
-    const totalLogs = db.prepare('SELECT COUNT(*) as count FROM audit_logs').get().count;
 
     res.send(`
     <html>
-    ${getHead('Impulse | Dashboard Overview')}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-4 md:p-8">
+    ${getHead('Impulse | Dashboard')}
+    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-8">
         <div class="max-w-6xl mx-auto">
             ${getNav('overview', req.user)}
-
-            <div class="mb-10">
-                <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
-                    System <span class="text-[#FFAA00]">Overview</span>
-                </h1>
-                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Real-time monitoring & statistics</p>
-            </div>
-
-            <!-- Stats Grid -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Servers</h3>
-                        <svg class="w-5 h-5 text-[#FFAA00]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
-                        </svg>
-                    </div>
+                <div class="bg-slate-900/40 p-6 rounded-2xl border border-slate-800">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase">Servers</h3>
                     <p class="text-4xl font-black text-white">${authorizedGuilds.length}</p>
-                    <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Monitored guilds</p>
                 </div>
-
-                <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-emerald-500/30 transition">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Pending Locks</h3>
-                        <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
-                    </div>
+                <div class="bg-slate-900/40 p-6 rounded-2xl border border-slate-800">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase">Locks</h3>
                     <p class="text-4xl font-black text-white">${totalLocks}</p>
-                    <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Active timers</p>
                 </div>
-
-                <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-blue-500/30 transition">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total Snippets</h3>
-                        <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
-                        </svg>
-                    </div>
+                <div class="bg-slate-900/40 p-6 rounded-2xl border border-slate-800">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase">Snippets</h3>
                     <p class="text-4xl font-black text-white">${totalSnippets}</p>
-                    <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Saved templates</p>
                 </div>
             </div>
 
-            <!-- Server Cards -->
-            <div class="mb-10">
-                <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-xl font-black text-white uppercase tracking-tight">Managed Servers</h2>
-                    <a href="/threads" class="text-[#FFAA00] text-[9px] font-black tracking-widest hover:underline uppercase">View All →</a>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    ${authorizedGuilds.slice(0, 6).map(s => `
-                        <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition shadow-lg">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-[#FFAA00] uppercase text-[10px] font-black tracking-widest opacity-80 truncate flex-1">${s.guild_name}</h3>
-                                <span class="text-[8px] bg-slate-800 px-2 py-1 rounded text-slate-500 font-bold">${s.snippetCount} SNIPPETS</span>
-                            </div>
-                            <div class="space-y-2">
-                                ${s.timers.length > 0 ? s.timers.slice(0, 3).map(t => `
-                                    <div class="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-slate-800/50">
-                                        <span class="text-[10px] mono text-slate-500">ID:${t.thread_id.slice(-5)}</span>
-                                        <span class="text-xs font-bold text-emerald-400 mono" data-expire="${t.lock_at}">--:--</span>
-                                    </div>
-                                `).join('') : '<div class="text-slate-600 text-xs py-2 italic text-center">No active timers</div>'}
-                            </div>
+            <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden">
+                <div class="p-6 border-b border-slate-800">Recent Activity</div>
+                <div class="divide-y divide-slate-800/40">
+                    ${recentLogs.map(l => `
+                        <div class="p-4 flex items-center gap-4">
+                            <span class="text-[10px] mono text-slate-500" data-timestamp="${l.timestamp}">Loading...</span>
+                            <span class="px-2 py-0.5 rounded text-[8px] font-black ${getActionColor(l.action)}">${l.action}</span>
+                            <p class="text-xs flex-1">${l.details}</p>
                         </div>`).join('')}
                 </div>
             </div>
-
-            <!-- Recent Activity -->
-            <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
-                <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/20">
-                    <h2 class="text-md md:text-lg font-bold text-white flex items-center gap-2 uppercase tracking-tight">
-                        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                        Recent Activity
-                    </h2>
-                    <a href="/logs" class="text-[#FFAA00] text-[9px] font-black tracking-widest hover:bg-[#FFAA00] hover:text-black transition px-4 py-2 rounded-lg border border-[#FFAA00]/20 uppercase">Full Logs</a>
-                </div>
-                <div class="divide-y divide-slate-800/40">
-                    ${recentLogs.map(l => {
-                        return `
-                        <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
-                            <div class="hidden md:block text-[10px] mono text-slate-600 w-20 text-right shrink-0" data-timestamp="${l.timestamp}">
-                                --:--:--
-                            </div>
-                            <div class="w-20 flex items-center justify-center shrink-0">
-                                <span class="px-2 py-0.5 rounded text-[8px] font-black mono ${getActionColor(l.action)} inline-block text-center min-w-[70px]">
-                                    ${l.action}
-                                </span>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs text-slate-300 truncate font-medium">${l.details}</p>
-                            </div>
-                            <div class="text-[9px] font-black text-slate-600 uppercase tracking-widest shrink-0 w-24 text-right">
-                                ${l.guild_name || 'System'}
-                            </div>
-                        </div>
-                    `}).join('')}
-                </div>
-                <div class="p-4 bg-slate-900/20 text-center">
-                    <p class="text-[10px] text-slate-600 font-mono">Total Events: ${totalLogs.toLocaleString()}</p>
-                </div>
-            </div>
-
-            <!-- INFO FOOTER -->
-            <footer class="mt-12 pt-8 border-t border-slate-800/50">
-                <div class="max-w-3xl mx-auto text-center space-y-4">
-                    <div class="flex items-center justify-center gap-3 mb-4">
-                        <img src="${botAvatar}" class="w-8 h-8 rounded-full border border-[#FFAA00]/30">
-                        <h3 class="text-sm font-black text-[#FFAA00] uppercase tracking-widest">Impulse Dashboard</h3>
-                    </div>
-                    
-                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-6 backdrop-blur-sm">
-                        <p class="text-xs text-slate-400 leading-relaxed mb-3">
-                            <span class="text-[#FFAA00] font-bold">Privacy Notice:</span> This dashboard does not store, collect, or use any personal user data. 
-                            It only accesses Discord OAuth2 to verify your server membership and display relevant information from servers where the bot is installed.
-                        </p>
-                        <p class="text-[10px] text-slate-500 italic">
-                            All data is pulled in real-time and nothing is cached or saved beyond your active session.
-                        </p>
-                    </div>
-
-                    <div class="flex items-center justify-center gap-6 text-[9px] text-slate-600 uppercase tracking-wider font-bold">
-                        <span>Built for Gups Command Central</span>
-                        <span class="text-slate-800">•</span>
-                        <span>Powered by Discord.js</span>
-                    </div>
-                </div>
-            </footer>
-        </div>
-        <div class="mt-6 text-center text-xs text-slate-600 font-mono">
-                Showing ${logs.length} ${logs.length === 1 ? 'entry' : 'entries'} • Last updated: ${new Date().toLocaleTimeString()}
+            <div class="mt-6 text-center text-xs text-slate-600 font-mono">
+                Showing ${recentLogs.length} entries • Updated: ${new Date().toLocaleTimeString()}
             </div>
         </div>
         <script>
@@ -565,1731 +302,331 @@ app.get('/', async (req, res) => {
                     if (!raw || raw === "null") return;
                     const isoString = raw.replace(' ', 'T') + 'Z';
                     const date = new Date(isoString);
-                    if (isNaN(date.getTime())) return;
-                    el.innerText = date.toLocaleString(undefined, {
-                        month: 'short', day: 'numeric', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit', hour12: true
-                    });
+                    if (!isNaN(date.getTime())) el.innerText = date.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
                 });
             }
-            updateTimestamps();
+            window.onload = updateTimestamps;
         </script>
-    </body>
-    </html>
-    `);
+    </body></html>`);
 });
 
 app.get('/logs', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
-    const filterAction = req.query.action;
-    const filterGuild = req.query.guild;
     const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
     const managedGuildIds = [];
-
-    for (const settings of allSettings) {
-        const guild = client.guilds.cache.get(settings.guild_id);
-        if (!guild) continue;
-        try {
-            const member = await guild.members.fetch(req.user.id);
-            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
-                managedGuildIds.push(settings.guild_id);
-            }
-        } catch (e) {}
-    }
-
-     if (managedGuildIds.length === 0) {
-        return res.send(getErrorPage("No Access", "You don't have permission to view logs."));
-    }
-
-    let query = `SELECT * FROM audit_logs WHERE guild_id IN (${managedGuildIds.map(() => '?').join(',')})`;
-    let params = [...managedGuildIds];
-
-    if (filterAction) {
-        query += " AND action = ?";
-        params.push(filterAction);
-    }
-    
-    if (filterGuild && managedGuildIds.includes(filterGuild)) {
-        query += " AND guild_id = ?";
-        params.push(filterGuild);
-    }
-
-    query += " ORDER BY timestamp DESC LIMIT 100";
-
-    const rawLogs = db.prepare(query).all(...params);
-    
-    const logs = rawLogs.map(log => {
-        const guild = client.guilds.cache.get(log.guild_id);
-        let contextLink = null;
-        let readableContext = null;
-        
-        if (log.thread_id && log.message_id) {
-            contextLink = getDiscordLink(log.guild_id, log.thread_id, log.message_id);
-            readableContext = getReadableName(log.thread_id, log.guild_id);
-        } else if (log.thread_id) {
-            contextLink = getDiscordLink(log.guild_id, log.thread_id);
-            readableContext = getReadableName(log.thread_id, log.guild_id);
-        }
-        
-        return {
-            ...log,
-            displayName: guild ? guild.name : `Server ${log.guild_id.slice(-4)}`,
-            contextLink,
-            readableContext,
-            actionStyle: getActionColor(log.action)
-        };
-    });
-
-    const allActions = [
-        'SNIPPET_CREATE', 'SNIPPET_UPDATE', 'SNIPPET_DELETE', 'SNIPPET',
-        'LOCK', 'CANCEL', 'GREET', 'DUPLICATE', 'SETUP', 'RESOLVED',
-        'ANSWERED', 'AUTO_CLOSE', 'STALE_WARNING', 'THREAD_RENEWED',
-        'LINK_ADDED', 'LINK_ACCESSED'
-    ];
-    
-    const managedGuilds = managedGuildIds.map(id => {
-        const guild = client.guilds.cache.get(id);
-        return { id, name: guild ? guild.name : `Server ${id.slice(-4)}` };
-    });
-
-    res.send(`
-    <html>
-    ${getHead('Impulse | Audit Logs')}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
-        <div class="max-w-6xl mx-auto">
-            ${getNav('logs', req.user)}
-
-            <div class="mb-8">
-                <h1 class="text-3xl font-black text-white uppercase tracking-tighter mb-2">Audit <span class="text-[#FFAA00]">Logs</span></h1>
-                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">System event archive & activity monitoring</p>
-            </div>
-
-            <div class="space-y-6 mb-8">
-                <div>
-                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Action Type</p>
-                    <div class="flex flex-wrap gap-2">
-                        <a href="/logs${filterGuild ? `?guild=${filterGuild}` : ''}" 
-                           class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!filterAction ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                            All Actions
-                        </a>
-                        ${allActions.map(action => `
-                            <a href="/logs?action=${action}${filterGuild ? `&guild=${filterGuild}` : ''}" 
-                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filterAction === action ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                                ${action.replace(/_/g, ' ')}
-                            </a>
-                        `).join('')}
-                    </div>
-                </div>
-
-                <div>
-                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Filter by Server</p>
-                    <div class="flex flex-wrap gap-2">
-                        <a href="/logs${filterAction ? `?action=${filterAction}` : ''}" 
-                           class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!filterGuild ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                            All Servers
-                        </a>
-                        ${managedGuilds.map(g => `
-                            <a href="/logs?guild=${g.id}${filterAction ? `&action=${filterAction}` : ''}" 
-                               class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filterGuild === g.id ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'}">
-                                ${g.name}
-                            </a>
-                        `).join('')}
-                    </div>
-                </div>
-            </div>
-
-            <div class="bg-slate-900/40 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[800px]">
-                        <thead class="bg-slate-900/60 border-b border-slate-800">
-                            <tr>
-                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Timestamp</th>
-                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Source</th>
-                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Action</th>
-                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Context</th>
-                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">User</th>
-                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Details</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-800/40">
-                            ${logs.length > 0 ? logs.map(l => {
-                                const date = new Date(l.timestamp);
-                                const formattedDate = date.toLocaleDateString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric',
-                                    year: 'numeric'
-                                });
-                                const formattedTime = date.toLocaleTimeString('en-US', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    second: '2-digit',
-                                    hour12: false
-                                });
-                                
-                                return `
-                                <tr class="hover:bg-white/5 transition-colors">
-                                        <td class="p-4 text-[10px] text-slate-500 whitespace-nowrap font-mono">
-                                            <!-- We leave this span empty and let the frontend script fill it -->
-                                            <span class="font-bold block" data-timestamp="${l.timestamp}">Loading...</span>
-                                        </td>
-                                    <td class="p-4">
-                                        <span class="text-[10px] font-black text-[#FFAA00] uppercase bg-[#FFAA00]/5 px-2 py-1 rounded border border-[#FFAA00]/10">
-                                            ${l.displayName}
-                                        </span>
-                                    </td>
-                                    <td class="p-4">
-                                        <span class="px-2 py-1 rounded border text-[9px] font-bold uppercase ${l.actionStyle}">
-                                            ${l.action}
-                                        </span>
-                                    </td>
-                                    <td class="p-4">
-                                        ${l.contextLink ? `
-                                            <a href="${l.contextLink}" target="_blank" class="flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 transition group">
-                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
-                                                </svg>
-                                                <span class="truncate max-w-[120px]" title="${l.readableContext}">${l.readableContext}</span>
-                                            </a>
-                                        ` : '<span class="text-xs text-slate-600">—</span>'}
-                                    </td>
-                                    <td class="p-4">
-                                        <div class="flex items-center gap-2">
-                                            <img src="${l.user_avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
-                                                 class="w-6 h-6 rounded-full border border-slate-700">
-                                            <span class="text-xs font-bold text-slate-300">${l.user_name || 'SYSTEM'}</span>
-                                        </div>
-                                    </td>
-                                    <td class="p-4">
-                                        <details class="group">
-                                            <summary class="list-none flex items-center justify-between hover:text-white transition-all cursor-pointer text-xs text-slate-400">
-                                                <span class="truncate max-w-md">${l.details}</span>
-                                                <svg class="w-3 h-3 text-slate-600 group-open:rotate-180 transition-transform shrink-0 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                                </svg>
-                                            </summary>
-                                            <div class="mt-3 p-3 bg-black/40 rounded-lg border border-slate-800 font-mono text-[10px] text-blue-400">
-                                                <span class="text-slate-600 mr-2">>_</span>${l.command_used || 'N/A (Automated Event)'}
-                                            </div>
-                                        </details>
-                                    </td>
-                                </tr>
-                            `}).join('') : `
-                                <tr>
-                                    <td colspan="6" class="p-8 text-center text-slate-500">
-                                        <div class="flex flex-col items-center gap-3">
-                                            <svg class="w-12 h-12 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                                            </svg>
-                                            <p class="text-sm font-bold uppercase tracking-widest">No logs found</p>
-                                            <p class="text-xs">Try adjusting your filters</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            `}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="mt-6 text-center text-xs text-slate-600 font-mono">
-                Showing ${logs.length} ${logs.length === 1 ? 'entry' : 'entries'} • Last updated: ${new Date().toLocaleTimeString()}
-            </div>
-        </div>
-    </body>
-    </html>
-    `);
-});
-
-app.get('/threads', async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
-    const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
-    const authorizedGuilds = [];
-
-    for (const settings of allSettings) {
-        const guild = client.guilds.cache.get(settings.guild_id);
-        if (!guild) continue;
-        try {
-            const member = await guild.members.fetch(req.user.id);
-            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, settings)) {
-                const timers = db.prepare('SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?').all(settings.guild_id);
-                const threadTracking = db.prepare('SELECT COUNT(*) as count FROM thread_tracking WHERE guild_id = ?').get(settings.guild_id).count;
-                authorizedGuilds.push({ ...settings, timers, threadTracking });
-            }
-        } catch (e) {}
-    }
-
-    res.send(`
-    <html>
-    ${getHead('Impulse | Thread Management')}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
-        <div class="max-w-6xl mx-auto">
-            ${getNav('threads', req.user)}
-
-            <div class="mb-10">
-                <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
-                    Thread <span class="text-[#FFAA00]">Management</span>
-                </h1>
-                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Monitor active timers & thread automation</p>
-            </div>
-
-            <!-- Summary Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                <div class="bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 backdrop-blur-md p-6 rounded-2xl border border-emerald-500/20 shadow-lg">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Active Timers</h3>
-                        <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-                    <p class="text-4xl font-black text-white mb-1">${authorizedGuilds.reduce((acc, g) => acc + g.timers.length, 0)}</p>
-                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Pending locks across all servers</p>
-                </div>
-
-                <div class="bg-gradient-to-br from-blue-500/10 to-blue-500/5 backdrop-blur-md p-6 rounded-2xl border border-blue-500/20 shadow-lg">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Tracked Threads</h3>
-                        <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
-                        </svg>
-                    </div>
-                    <p class="text-4xl font-black text-white mb-1">${authorizedGuilds.reduce((acc, g) => acc + g.threadTracking, 0)}</p>
-                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Threads monitored for auto-close</p>
-                </div>
-
-                <div class="bg-gradient-to-br from-amber-500/10 to-amber-500/5 backdrop-blur-md p-6 rounded-2xl border border-amber-500/20 shadow-lg">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-[10px] font-black text-amber-400 uppercase tracking-widest">Configured Servers</h3>
-                        <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-                        </svg>
-                    </div>
-                    <p class="text-4xl font-black text-white mb-1">${authorizedGuilds.length}</p>
-                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">With active thread automation</p>
-                </div>
-            </div>
-
-            <!-- Server Thread Details -->
-            <div class="space-y-6">
-                ${authorizedGuilds.map(s => `
-                    <div class="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-800/50 overflow-hidden shadow-xl">
-                        <div class="p-6 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/20">
-                            <div>
-                                <h3 class="text-xl font-black text-white uppercase tracking-tight mb-1">${s.guild_name}</h3>
-                                <div class="flex items-center gap-4 text-[10px] text-slate-500 uppercase font-bold tracking-wider">
-                                    <span>Forum: <span class="text-[#FFAA00]">#${s.forum_id.slice(-4)}</span></span>
-                                    <span>•</span>
-                                    <span>${s.timers.length} Active Timers</span>
-                                    <span>•</span>
-                                    <span>${s.threadTracking} Tracked</span>
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-[9px] px-3 py-1.5 rounded-lg ${s.timers.length > 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-500 border border-slate-700'} font-black uppercase">
-                                    ${s.timers.length > 0 ? 'Active' : 'Idle'}
-                                </span>
-                            </div>
-                        </div>
-
-                        ${s.timers.length > 0 ? `
-                            <div class="p-6">
-                                <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4">Pending Lock Queue</p>
-                                <div class="space-y-3">
-                                    ${s.timers.map(t => `
-                                        <div class="flex items-center justify-between bg-black/40 p-4 rounded-xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition">
-                                            <div class="flex items-center gap-4">
-                                                <div class="bg-slate-800 px-3 py-2 rounded-lg">
-                                                    <p class="text-[10px] mono text-slate-500 font-bold">ID: ${t.thread_id.slice(-8)}</p>
-                                                </div>
-                                                <div>
-                                                    <p class="text-xs font-bold text-white">Thread Lock Scheduled</p>
-                                                    <p class="text-[10px] text-slate-600 uppercase tracking-wider font-bold mt-0.5">Auto-lock timer running</p>
-                                                </div>
-                                            </div>
-                                            <div class="flex items-center gap-4">
-                                                <div class="text-right">
-                                                    <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Time Remaining</p>
-                                                    <p class="text-lg font-black text-emerald-400 mono" data-expire="${t.lock_at}">--:--</p>
-                                                </div>
-                                                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                                </svg>
-                                            </div>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        ` : `
-                            <div class="p-12 text-center">
-                                <svg class="w-12 h-12 text-slate-700 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                <p class="text-sm font-bold text-slate-600 uppercase tracking-widest">All Clear</p>
-                                <p class="text-xs text-slate-700 mt-1">No pending thread locks</p>
-                            </div>
-                        `}
-
-                        <div class="p-4 bg-slate-900/20 border-t border-slate-800">
-                            <div class="flex items-center justify-between text-[10px]">
-                                <div class="flex items-center gap-6">
-                                    <span class="text-slate-600 uppercase font-bold tracking-wider">Configuration</span>
-                                    <span class="text-slate-500">Resolved Tag: <code class="text-[#FFAA00] bg-[#FFAA00]/10 px-2 py-0.5 rounded">${s.resolved_tag}</code></span>
-                                    <span class="text-slate-500">Duplicate Tag: <code class="text-sky-400 bg-sky-400/10 px-2 py-0.5 rounded">${s.duplicate_tag}</code></span>
-                                    ${s.unanswered_tag ? `<span class="text-slate-500">Unanswered Tag: <code class="text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">${s.unanswered_tag}</code></span>` : ''}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-
-            ${authorizedGuilds.length === 0 ? `
-                <div class="text-center py-20">
-                    <svg class="w-16 h-16 text-slate-700 mx-auto mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
-                    </svg>
-                    <h3 class="text-xl font-black text-white uppercase tracking-tight mb-2">No Servers Configured</h3>
-                    <p class="text-sm text-slate-500 mb-6">Add the bot to a server and run <code class="bg-slate-800 px-2 py-1 rounded text-[#FFAA00]">/setup</code> to get started</p>
-                    <a href="/invite" class="inline-block bg-[#FFAA00] text-black px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-[#ffbb33] transition">
-                        Add Bot to Server
-                    </a>
-                </div>
-            ` : ''}
-        </div>
-
-        <script>
-            function updateTimers() {
-                document.querySelectorAll('[data-expire]').forEach(el => {
-                    const diff = parseInt(el.getAttribute('data-expire')) - Date.now();
-                    if (diff <= 0) {
-                        el.innerText = "LOCKED";
-                        el.className = "text-lg font-black text-rose-500 mono uppercase";
-                    } else {
-                        const m = Math.floor(diff / 60000);
-                        const s = Math.floor((diff % 60000) / 1000);
-                        el.innerText = m + "m " + s + "s";
-                    }
-                });
-            }
-            setInterval(updateTimers, 1000); 
-            updateTimers();
-        </script>
-    </body>
-    </html>
-    `);
-});
-
-app.get('/invite', (req, res) => {
-    // Calculated Permission Integer: 312680377408
-    // Includes: View Channels, Send Messages, Manage Messages, Embed Links, Read Message History, 
-    // Add Reactions, Use External Emojis, Manage Threads, Send Messages in Threads.
-    const permissions = '312680377408';
-    const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`;
-    
-    const botAvatar = client.user.displayAvatarURL();
-    
-    res.send(`
-    <html>
-    ${getHead('Impulse | System Authorization')}
-    <body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6">
-        <div class="max-w-3xl w-full">
-            <!-- Terminal Header -->
-            <div class="text-center mb-10">
-                <div class="inline-block p-1 rounded-full bg-gradient-to-tr from-[#FFAA00] to-amber-300 shadow-[0_0_30px_rgba(255,170,0,0.3)] mb-6">
-                    <img src="${botAvatar}" class="w-24 h-24 rounded-full border-4 border-[#0b0f1a]">
-                </div>
-                <h1 class="text-5xl font-black tracking-tighter text-white uppercase italic">Impulse<span class="text-[#FFAA00] not-italic">OS</span></h1>
-                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-[0.5em] mt-2">Advanced Forum Management Protocol</p>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <!-- Feature List -->
-                <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
-                    <h3 class="text-[#FFAA00] text-xs font-black uppercase tracking-widest mb-4 flex items-center gap-2">
-                        <span class="w-2 h-2 bg-[#FFAA00] rounded-full animate-ping"></span>
-                        System Modules
-                    </h3>
-                    <ul class="space-y-4">
-                        <li class="flex gap-3 items-start">
-                            <svg class="w-5 h-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            <div>
-                                <p class="text-xs font-bold text-white uppercase">Automated Greeting</p>
-                                <p class="text-[10px] text-slate-500">Instant welcome embeds for new forum threads with customizable variables.</p>
-                            </div>
-                        </li>
-                        <li class="flex gap-3 items-start">
-                            <svg class="w-5 h-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            <div>
-                                <p class="text-xs font-bold text-white uppercase">Stale Thread Sweep</p>
-                                <p class="text-[10px] text-slate-500">Automatic 24-day warnings and 30-day locks for inactive technical threads.</p>
-                            </div>
-                        </li>
-                        <li class="flex gap-3 items-start">
-                            <svg class="w-5 h-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            <div>
-                                <p class="text-xs font-bold text-white uppercase">Link Distribution</p>
-                                <p class="text-[10px] text-slate-500">Securely deliver links to users via DM using the 🔗 reaction system.</p>
-                            </div>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Permission Transparency -->
-                <div class="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
-                    <h3 class="text-blue-400 text-xs font-black uppercase tracking-widest mb-4">Security Credentials</h3>
-                    <div class="space-y-2">
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Manage Threads</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Manage Messages</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Embed Links</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
-                        <div class="flex justify-between text-[10px] font-mono border-b border-slate-800 pb-1">
-                            <span class="text-slate-500">Add Reactions</span>
-                            <span class="text-blue-400">REQUIRED</span>
-                        </div>
-                    </div>
-                    <div class="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                        <p class="text-[9px] text-blue-300 leading-relaxed italic">
-                            Impulse OS requires 'Manage Messages' specifically to remove user reactions after delivering links, keeping your thread UI clean.
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- CTA Section -->
-            <div class="bg-[#FFAA00] rounded-2xl p-1 shadow-[0_0_50px_rgba(255,170,0,0.15)]">
-                <a href="${inviteUrl}" target="_blank" class="block w-full bg-[#0b0f1a] hover:bg-transparent text-[#FFAA00] hover:text-black py-5 rounded-[14px] text-center transition-all group">
-                    <span class="text-sm font-black uppercase tracking-[0.3em]">Authorize Connection</span>
-                </a>
-            </div>
-
-            <div class="mt-8 flex justify-center gap-8">
-                <a href="/" class="text-[10px] font-bold text-slate-600 hover:text-[#FFAA00] uppercase tracking-widest transition-colors">← Return to Terminal</a>
-                <span class="text-slate-800">|</span>
-                <p class="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Version 2.4.0 (Stable)</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    `);
-});
-
-app.get('/snippets', async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
-    // 1. Get IDs of guilds where the user has permission
-    const allowedGuildIds = db.prepare(`SELECT guild_id FROM guild_settings`).all()
-      .map(g => g.guild_id)
-      .filter(gid => {
-          const guild = client.guilds.cache.get(gid);
-          if (!guild) return false;
-          const member = guild.members.cache.get(req.user.id);
-          return member && (
-              member.permissions.has(PermissionFlagsBits.Administrator) ||
-              hasHelperRole(member, getSettings(gid))
-          );
-      });
-
-    // Handle case where user has no access to any servers
-    if (allowedGuildIds.length === 0) {
-        return res.send(`<html>${getHead('Snippets')} <body class="bg-[#0b0f1a] text-white p-8">${getNav('snippets', req.user)} <p>No snippets found or no server access.</p></body></html>`);
-    }
-
-    // 2. Fetch snippets for those guilds
-    const snippets = db.prepare(`
-        SELECT * FROM snippets
-        WHERE guild_id IN (${allowedGuildIds.map(() => '?').join(',')})
-        ORDER BY updated_at DESC
-    `).all(...allowedGuildIds);
-
-    res.send(`
-    <html>
-    ${getHead('Impulse | Snippets')}
-    <body class="bg-[#0b0f1a] text-slate-200 p-6">
-        <div class="max-w-5xl mx-auto">
-            ${getNav('snippets', req.user)}
-
-            <div class="flex justify-between items-center mb-6">
-                <h1 class="text-2xl font-black text-white uppercase">Snippets</h1>
-                <a href="/snippets/new" class="bg-[#FFAA00] text-black px-4 py-2 rounded-lg text-[10px] font-black uppercase">
-                    + Create Snippet
-                </a>
-            </div>
-
-            <div class="space-y-3">
-                ${snippets.map(s => {
-                    // Look up the guild name for better UI
-                    const guild = client.guilds.cache.get(s.guild_id);
-                    return `
-                    <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <p class="font-bold text-white">${s.name}</p>
-                                <span class="text-[9px] bg-slate-800 px-2 py-0.5 rounded text-slate-500">${guild ? guild.name : 'Unknown Server'}</span>
-                            </div>
-                            <p class="text-[10px] text-slate-500">ID: ${s.created_by}</p>
-                            <p class="text-xs text-slate-400">${s.title || 'No title'}</p>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <a href="/snippets/toggle/${s.id}" class="text-[9px] uppercase font-black ${s.enabled ? 'text-emerald-400' : 'text-rose-500'} hover:underline">
-                                ${s.enabled ? 'Enabled' : 'Disabled'}
-                            </a>
-                            <a href="/snippets/edit/${s.id}" class="text-xs text-sky-400 hover:underline">Edit</a>
-                            <a href="/snippets/delete/${s.id}" class="text-xs text-rose-500 hover:underline" onclick="return confirm('Delete this snippet?')">Delete</a>
-                        </div>
-                    </div>
-                `}).join('')}
-            </div>
-        </div>
-    </body>
-    </html>
-    `);
-});
-
-app.get('/snippets/new', async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
-    // FIX: Use an async loop to fetch members so the dropdown isn't empty
-    const allowedGuilds = [];
-    const allSettings = db.prepare(`SELECT guild_id, guild_name FROM guild_settings`).all();
-    
     for (const s of allSettings) {
         const guild = client.guilds.cache.get(s.guild_id);
         if (!guild) continue;
         try {
             const member = await guild.members.fetch(req.user.id);
-            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, s)) {
-                allowedGuilds.push(s);
-            }
-        } catch (e) { /* User not in this guild */ }
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, s)) managedGuildIds.push(s.guild_id);
+        } catch (e) {}
     }
+    if (managedGuildIds.length === 0) return res.send(getErrorPage("No Access", "Permission Denied"));
 
-    res.send(`
-    <html>
-    ${getHead('Impulse | Create Snippet')}
-    <style>
-        #preTitle:empty, #preDesc:empty, #preFooter:empty, #preImage:not([src]), #preThumb:not([src]) { display: none; }
-        .markdown-hint { color: #5865F2; cursor: help; border-bottom: 1px dashed #5865F2; }
-    </style>
-    <body class="bg-[#0b0f1a] text-slate-200 p-6">
-        <div class="max-w-7xl mx-auto">
-            ${getNav('snippets', req.user)}
-            
-            <div class="mb-8">
-                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Create <span class="text-[#FFAA00]">Snippet</span></h1>
-                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest mt-1">Supports Discord Markdown</p>
-            </div>
+    const rawLogs = db.prepare(`SELECT * FROM audit_logs WHERE guild_id IN (${managedGuildIds.map(()=>'?').join(',')}) ORDER BY timestamp DESC LIMIT 100`).all(...managedGuildIds);
+    const logs = rawLogs.map(log => ({ ...log, displayName: client.guilds.cache.get(log.guild_id)?.name || 'Server', actionStyle: getActionColor(log.action) }));
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                <form id="snippetForm" method="POST" action="/snippets/new" class="space-y-4">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label class="text-[9px] font-black text-slate-500 uppercase mb-2 block">Target Server</label>
-                            <select name="guild_id" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white outline-none">
-                                <option value="" disabled selected>Choose server...</option>
-                                ${allowedGuilds.map(g => `<option value="${g.guild_id}">${g.guild_name}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label class="text-[9px] font-black text-slate-500 uppercase mb-2 block">Trigger Name</label>
-                            <input name="name" required placeholder="e.g. welcome" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white outline-none">
-                        </div>
-                    </div>
-
-                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <input id="inTitle" name="title" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
-                        <input id="inUrl" name="url" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
-                        <textarea id="inDesc" name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32 outline-none resize-none"></textarea>
-                    </div>
-
-                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <input id="inImage" name="image_url" placeholder="Main Image URL" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
-                        <input id="inThumb" name="thumbnail_url" placeholder="Thumbnail URL" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <input id="inFooter" name="footer" placeholder="Footer text" class="md:col-span-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-xs text-white outline-none">
-                        <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-                            <input id="inColor" name="color" type="color" value="#FFAA00" class="w-8 h-8 cursor-pointer bg-transparent border-none">
-                            <span class="text-[10px] font-mono text-slate-500" id="hexVal">#FFAA00</span>
-                        </div>
-                    </div>
-
-                    <!-- FIX: Integrated Buttons -->
-                    <div class="flex gap-4">
-                        <button type="submit" class="flex-[2] bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-[#FFC040] transition-all">
-                            Create Snippet
-                        </button>
-                        <a href="/snippets" class="flex-1 bg-slate-800 text-slate-400 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest text-center hover:bg-slate-700 transition-all border border-slate-700">
-                            Cancel
-                        </a>
-                    </div>
-                </form>
-
-                <!-- LIVE PREVIEW SIDE -->
-                <div class="sticky top-6">
-                    <div class="bg-[#313338] p-4 rounded-sm shadow-2xl font-['gg_sans',_sans-serif]">
-                        <div class="flex items-start gap-4">
-                            <img src="${client.user.displayAvatarURL()}" class="w-10 h-10 rounded-full">
-                            <div class="flex-1 overflow-hidden">
-                                <div class="flex items-center gap-2 mb-1">
-                                    <span class="font-medium text-white text-sm">${client.user.username}</span>
-                                    <span class="bg-[#5865F2] text-white text-[10px] px-1.5 py-0.5 rounded-[3px] font-bold uppercase">App</span>
-                                    <span class="text-[#949ba4] text-[10px]">Today at 12:00 PM</span>
-                                </div>
-                                
-                                <div id="preBorder" class="bg-[#2b2d31] border-l-[4px] border-[#FFAA00] rounded-[4px] p-3 mt-1 max-w-[432px] relative">
-                                    <img id="preThumb" src="" class="absolute top-3 right-3 w-20 h-20 rounded-md object-cover">
-                                    <div id="preTitle" class="text-white font-bold text-base mb-1"></div>
-                                    <div id="preDesc" class="text-[#dbdee1] text-sm leading-[1.375rem] whitespace-pre-wrap"></div>
-                                    <img id="preImage" src="" class="mt-3 rounded-md w-full max-h-80 object-cover">
-                                    <div id="preFooter" class="text-[#b5bac1] text-[10px] mt-2 font-medium"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            const inputs = {
-                title: document.getElementById('inTitle'),
-                url: document.getElementById('inUrl'),
-                desc: document.getElementById('inDesc'),
-                footer: document.getElementById('inFooter'),
-                color: document.getElementById('inColor'),
-                image: document.getElementById('inImage'),
-                thumb: document.getElementById('inThumb')
-            };
-
-            const preview = {
-                title: document.getElementById('preTitle'),
-                desc: document.getElementById('preDesc'),
-                footer: document.getElementById('preFooter'),
-                border: document.getElementById('preBorder'),
-                hex: document.getElementById('hexVal'),
-                image: document.getElementById('preImage'),
-                thumb: document.getElementById('preThumb')
-            };
-
-            function simulateVars(text) {
-                if (!text) return "";
-                return text
-                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                    .replace(/{user}/g, '<span class="text-[#5865F2] hover:underline">@${req.user.username}</span>')
-                    .replace(/{server}/g, '<strong>Impulse OS</strong>')
-                    .replace(/{br}/g, '<br>')
-                    .replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>')
-                    .replace(/\\*(.*?)\\*/g, '<em>$1</em>')
-                    .replace(/\`(.*?)\`/g, '<code class="bg-[#1e1f22] px-1 rounded">$1</code>')
-                    .replace(/\\[(.*?)\\]\\((.*?)\\)/g, '<a href="#" class="text-[#00a8fc]">$1</a>');
-            }
-
-            function updatePreview() {
-                const rawTitle = inputs.title.value;
-                if (inputs.url.value) {
-                    preview.title.innerHTML = '<a href="#" class="text-[#00a8fc] hover:underline">' + simulateVars(rawTitle) + '</a>';
-                } else {
-                    preview.title.innerHTML = simulateVars(rawTitle);
-                }
-
-                preview.desc.innerHTML = simulateVars(inputs.desc.value);
-                preview.footer.innerText = inputs.footer.value;
-                preview.border.style.borderColor = inputs.color.value;
-                preview.hex.innerText = inputs.color.value.toUpperCase();
-                
-                preview.image.src = inputs.image.value;
-                preview.image.style.display = inputs.image.value ? 'block' : 'none';
-                
-                preview.thumb.src = inputs.thumb.value;
-                preview.thumb.style.display = inputs.thumb.value ? 'block' : 'none';
-            }
-
-            Object.values(inputs).forEach(input => {
-                input.addEventListener('input', updatePreview);
-            });
-            updatePreview();
-        </script>
-    </body>
-    </html>
-    `);
+    res.send(`<html>${getHead('Impulse | Logs')} <body class="bg-[#0b0f1a] text-slate-200 p-8"><div class="max-w-6xl mx-auto">${getNav('logs', req.user)}<table class="w-full text-left">
+        ${logs.map(l => `<tr><td class="p-4 text-[10px]" data-timestamp="${l.timestamp}">Loading...</td><td class="p-4"><span class="px-2 py-1 rounded text-[9px] ${l.actionStyle}">${l.action}</span></td><td class="p-4 text-xs">${l.details}</td></tr>`).join('')}
+    </table></div><script>function updateTimestamps(){document.querySelectorAll('[data-timestamp]').forEach(el=>{const r=el.getAttribute('data-timestamp');if(!r||r==="null")return;const i=r.replace(' ','T')+'Z';const d=new Date(i);if(!isNaN(d.getTime()))el.innerText=d.toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});});}window.onload=updateTimestamps;</script></body></html>`);
 });
 
-app.post('/snippets/new', express.urlencoded({ extended: true }), async (req, res) => {
+app.get('/snippets/new', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
-    const { guild_id, name, title, description, color, footer, url, image_url, thumbnail_url } = req.body;
-
-    try {
-        // --- SECURITY VALIDATION ---
-        const guild = client.guilds.cache.get(guild_id);
-        if (!guild) return res.status(403).send("Forbidden: Bot is not in this server.");
-
-        const member = await guild.members.fetch(req.user.id).catch(() => null);
-        if (!member) return res.status(403).send("Forbidden: You are not in this server.");
-
-        const isAuthorized = member.permissions.has(PermissionFlagsBits.Administrator) || 
-                           hasHelperRole(member, getSettings(guild_id));
-
-        if (!isAuthorized) {
-            return res.status(403).send(getErrorPage("Access Denied", "Clearance Level: Administrator or Command Helper required for snippet creation."));
-        }
-
-        // --- DUPLICATE CHECK ---
-        const existing = db.prepare(`SELECT id FROM snippets WHERE guild_id = ? AND name = ?`).get(guild_id, name.toLowerCase());
-        if (existing) {
-            return res.send(`<html>${getHead('Error')}<body class="bg-[#0b0f1a] text-white p-8">
-                <h1 class="text-xl font-bold">Duplicate Trigger Name!</h1>
-                <p>A snippet named "${name}" already exists for this server.</p>
-                <button onclick="window.history.back()" class="mt-4 bg-white text-black px-4 py-2 rounded">Go Back</button>
-            </body></html>`);
-        }
-
-        // --- DATABASE INSERT ---
-        db.prepare(`
-            INSERT INTO snippets (
-                guild_id, name, title, description, color, footer, url, image_url, thumbnail_url, created_by
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            guild_id,
-            name.toLowerCase(),
-            title,
-            description,
-            color,
-            footer,
-            url,
-            image_url,
-            thumbnail_url,
-            req.user.id
-        );
-
-        logAction(
-            guild_id, 
-            'SNIPPET_CREATE', 
-            `Created snippet: ${name}`, 
-            req.user.id, 
-            req.user.username, 
-            `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-            '/snippet',
-            null, 
-            null
-        );
-
-        res.redirect('/snippets');
-
-    } catch (err) {
-        console.error("Critical Post Error:", err);
-        res.status(500).send("Internal Server Error");
+    const allowedGuilds = [];
+    const allSettings = db.prepare(`SELECT guild_id, guild_name FROM guild_settings`).all();
+    for (const s of allSettings) {
+        const guild = client.guilds.cache.get(s.guild_id);
+        if (!guild) continue;
+        try {
+            const member = await guild.members.fetch(req.user.id);
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, s)) allowedGuilds.push(s);
+        } catch (e) {}
     }
+    res.send(`
+    <html>${getHead('Impulse | Create Snippet')}
+    <body class="bg-[#0b0f1a] text-slate-200 p-6"><div class="max-w-7xl mx-auto">${getNav('snippets', req.user)}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+        <form method="POST" action="/snippets/new" class="space-y-4">
+            <select name="guild_id" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white">${allowedGuilds.map(g=>`<option value="${g.guild_id}">${g.guild_name}</option>`).join('')}</select>
+            <input name="name" required placeholder="Trigger Name" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+            <input id="inTitle" name="title" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+            <input id="inUrl" name="url" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+            <textarea id="inDesc" name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32"></textarea>
+            <input id="inImage" name="image_url" placeholder="Main Image URL" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+            <input id="inThumb" name="thumbnail_url" placeholder="Thumbnail URL" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+            <input id="inFooter" name="footer" placeholder="Footer text" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
+            <input id="inColor" name="color" type="color" value="#FFAA00">
+            <div class="flex gap-4"><button type="submit" class="flex-[2] bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs">Create</button><a href="/snippets" class="flex-1 bg-slate-800 text-slate-400 py-4 rounded-xl font-black uppercase text-xs text-center">Cancel</a></div>
+        </form>
+        <div id="preBorder" class="bg-[#2b2d31] border-l-[4px] border-[#FFAA00] p-3 max-w-[432px]">
+            <img id="preThumb" src="" class="w-20 h-20 rounded-md float-right" style="display:none">
+            <div id="preTitle" class="text-white font-bold mb-1"></div>
+            <div id="preDesc" class="text-[#dbdee1] text-sm whitespace-pre-wrap"></div>
+            <img id="preImage" src="" class="mt-3 rounded-md w-full" style="display:none">
+            <div id="preFooter" class="text-[#b5bac1] text-[10px] mt-2"></div>
+        </div>
+    </div>
+    <script>
+        const i={t:document.getElementById('inTitle'),u:document.getElementById('inUrl'),d:document.getElementById('inDesc'),f:document.getElementById('inFooter'),c:document.getElementById('inColor'),im:document.getElementById('inImage'),th:document.getElementById('inThumb')};
+        const p={t:document.getElementById('preTitle'),d:document.getElementById('preDesc'),f:document.getElementById('preFooter'),b:document.getElementById('preBorder'),im:document.getElementById('preImage'),th:document.getElementById('preThumb')};
+        function sim(t){if(!t)return "";return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/{user}/g,'<span class="text-[#5865F2]">@User</span>').replace(/{br}/g,'<br>').replace(/\\*\\*(.*?)\\*\\*/g,'<strong>$1</strong>').replace(/\\*(.*?)\\*/g,'<em>$1</em>').replace(/\`(.*?)\`/g,'<code class="bg-[#1e1f22] px-1 rounded">$1</code>').replace(/\\[(.*?)\\]\\((.*?)\\)/g,'<a href="#" class="text-[#00a8fc]">$1</a>');}
+        function upd(){p.t.innerHTML=i.u.value?'<a href="#" class="text-[#00a8fc]">'+sim(i.t.value)+'</a>':sim(i.t.value);p.d.innerHTML=sim(i.d.value);p.f.innerText=i.f.value;p.b.style.borderColor=i.c.value;p.im.src=i.im.value;p.im.style.display=i.im.value?'block':'none';p.th.src=i.th.value;p.th.style.display=i.th.value?'block':'none';}
+        Object.values(i).forEach(el=>el.addEventListener('input',upd));upd();
+    </script>
+    </body></html>`);
 });
 
 app.get('/snippets/edit/:id', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
-    if (!snippet) return res.status(404).send(getErrorPage("Data Missing", "The requested snippet ID could not be located in the database.", "404"));
-    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send(getErrorPage("Access Denied", "You don't have the required permissions to manage snippets in this server."));
+    if (!snippet) return res.send(getErrorPage("Missing", "Snippet Not Found", "404"));
+    
+    const allowedGuilds = [];
+    const allSettings = db.prepare(`SELECT guild_id, guild_name FROM guild_settings`).all();
+    for (const s of allSettings) {
+        const guild = client.guilds.cache.get(s.guild_id);
+        if (!guild) continue;
+        try {
+            const member = await guild.members.fetch(req.user.id);
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, s)) allowedGuilds.push(s);
+        } catch (e) {}
+    }
+    if (!allowedGuilds.some(g=>g.guild_id === snippet.guild_id)) return res.send(getErrorPage("Access Denied", "No Permission"));
 
-    res.send(`
-    <html>
-    ${getHead('Impulse | Edit Snippet')}
-    <body class="bg-[#0b0f1a] text-slate-200 p-6">
-        <div class="max-w-6xl mx-auto">
-            ${getNav('snippets', req.user)}
-            
-            <div class="mb-8">
-                <h1 class="text-3xl font-black text-white uppercase tracking-tighter text-[#FFAA00]">Edit Snippet</h1>
-                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying trigger: /snippet name:${snippet.name}</p>
-            </div>
+    res.send(`<html>${getHead('Impulse | Edit Snippet')}<body class="bg-[#0b0f1a] text-slate-200 p-6"><div class="max-w-6xl mx-auto">${getNav('snippets', req.user)}<form method="POST" action="/snippets/edit/${snippet.id}" class="grid grid-cols-1 lg:grid-cols-2 gap-12"><div><input name="name" value="${snippet.name}" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white mb-4"><input id="inTitle" name="title" value="${snippet.title||''}" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white mb-4"><textarea id="inDesc" name="description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 mb-4">${snippet.description||''}</textarea><input id="inImage" name="image_url" value="${snippet.image_url||''}" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white mb-4"><input id="inThumb" name="thumbnail_url" value="${snippet.thumbnail_url||''}" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white mb-4"><div class="flex gap-4"><button type="submit" class="flex-[2] bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs">Save</button><a href="/snippets" class="flex-1 bg-slate-800 text-slate-400 py-4 rounded-xl font-black uppercase text-xs text-center">Cancel</a></div></div><div id="preBorder" class="bg-[#2b2d31] border-l-[4px] border-[#FFAA00] p-3"><div id="preTitle" class="text-white font-bold"></div><div id="preDesc" class="text-[#dbdee1] text-sm whitespace-pre-wrap"></div></div></form></div><script>const i={t:document.getElementById('inTitle'),d:document.getElementById('inDesc')};const p={t:document.getElementById('preTitle'),d:document.getElementById('preDesc')};function upd(){p.t.innerText=i.t.value;p.d.innerText=i.d.value;}Object.values(i).forEach(el=>el.addEventListener('input',upd));upd();</script></body></html>`);
+});
 
-            <form id="editForm" method="POST" action="/snippets/edit/${snippet.id}" class="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                <div class="space-y-6">
-                    <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Trigger Name (Command)</label>
-                        <input name="name" value="${snippet.name}" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none">
-                    </div>
-
-                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Embed Content</label>
-                        <input id="inTitle" name="title" value="${snippet.title || ''}" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        <input id="inUrl" name="url" value="${snippet.url || ''}" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        <textarea id="inDesc" name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 focus:border-[#FFAA00] outline-none resize-none">${snippet.description || ''}</textarea>
-                    </div>
-
-                    <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Assets & Footer</label>
-                        <input id="inFooter" name="footer" value="${snippet.footer || ''}" placeholder="Footer Text" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        <div class="grid grid-cols-2 gap-4">
-                            <input id="inImage" name="image_url" value="${snippet.image_url || ''}" placeholder="Main Image URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
-                            <input id="inThumb" name="thumbnail_url" value="${snippet.thumbnail_url || ''}" placeholder="Thumbnail URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
-                        </div>
-                    </div>
-
-                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-xs tracking-widest hover:bg-[#FFC040] transition-all shadow-lg shadow-amber-500/10">Save Changes</button>
-                    <a href="/snippets" class="block text-center text-slate-500 text-[10px] font-bold uppercase hover:text-white">Cancel & Exit</a>
-                </div>
-
-                <div class="sticky top-6">
-                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4 block text-center">Live Preview</label>
-                    <div class="bg-[#313338] p-4 rounded-sm shadow-2xl font-['gg_sans',_sans-serif]">
-                        <div class="flex items-start gap-4">
-                            <img src="${client.user.displayAvatarURL()}" class="w-10 h-10 rounded-full">
-                            <div class="flex-1 overflow-hidden">
-                                <div class="flex items-center gap-2 mb-1">
-                                    <span class="font-medium text-white text-sm">${client.user.username}</span>
-                                    <span class="bg-[#5865F2] text-white text-[10px] px-1.5 py-0.5 rounded-[3px] font-bold uppercase">App</span>
-                                    <span class="text-[#949ba4] text-[10px]">Today at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                </div>
-                                
-                                <div id="preBorder" class="bg-[#2b2d31] border-l-[4px] border-[#FFAA00] rounded-[4px] p-3 mt-1 max-w-[432px] relative">
-                                    <img id="preThumb" src="" class="absolute top-3 right-3 w-20 h-20 rounded-md object-cover">
-                                    <div id="preTitle" class="text-white font-bold text-base mb-1"></div>
-                                    <div id="preDesc" class="text-[#dbdee1] text-sm leading-[1.375rem] whitespace-pre-wrap"></div>
-                                    <img id="preImage" src="" class="mt-3 rounded-md w-full max-h-80 object-cover">
-                                    <div id="preFooter" class="text-[#b5bac1] text-[10px] mt-2 font-medium"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </form>
-        </div>
-
-        <script>
-            // Reuse your updatePreview script here to keep the experience consistent!
-            const inputs = {
-                title: document.getElementById('inTitle'),
-                desc: document.getElementById('inDesc'),
-                footer: document.getElementById('inFooter'),
-                url: document.getElementById('inUrl'),
-                image: document.getElementById('inImage'),
-                thumb: document.getElementById('inThumb')
-            };
-
-            const preview = {
-                title: document.getElementById('preTitle'),
-                desc: document.getElementById('preDesc'),
-                footer: document.getElementById('preFooter'),
-                image: document.getElementById('preImage'),
-                thumb: document.getElementById('preThumb')
-            };
-
-            function update() {
-                preview.title.innerText = inputs.title.value;
-                preview.desc.innerText = inputs.desc.value;
-                preview.footer.innerText = inputs.footer.value;
-                preview.image.src = inputs.image.value;
-                preview.image.style.display = inputs.image.value ? 'block' : 'none';
-                preview.thumb.src = inputs.thumb.value;
-                preview.thumb.style.display = inputs.thumb.value ? 'block' : 'none';
-            }
-
-            Object.values(inputs).forEach(i => i.addEventListener('input', update));
-            update();
-        </script>
-    </body>
-    </html>
-    `);
+app.post('/snippets/new', express.urlencoded({ extended: true }), async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    const { guild_id, name, title, description, color, footer, url, image_url, thumbnail_url } = req.body;
+    try {
+        const guild = client.guilds.cache.get(guild_id);
+        const member = await guild.members.fetch(req.user.id);
+        if (!member.permissions.has(PermissionFlagsBits.Administrator) && !hasHelperRole(member, getSettings(guild_id))) return res.status(403).send("No Permission");
+        db.prepare(`INSERT INTO snippets (guild_id, name, title, description, color, footer, url, image_url, thumbnail_url, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(guild_id, name.toLowerCase(), title, description, color, footer, url, image_url, thumbnail_url, req.user.id);
+        logAction(guild_id, 'SNIPPET_CREATE', `Created snippet: ${name}`, req.user.id, req.user.username, `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`, '/snippet', null, null);
+        res.redirect('/snippets');
+    } catch (err) { res.status(500).send("Error"); }
 });
 
 app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
-    if (!snippet) return res.redirect('/snippets');
-    
-    if (!(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send(getErrorPage("Access Denied", "System security prevents unauthorized modification of this snippet."));
-
+    if (!snippet || !(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("No Permission");
     const { name, title, description, footer, color, url, image_url, thumbnail_url } = req.body;
-
-    try {
-        db.prepare(`
-            UPDATE snippets 
-            SET name = ?, title = ?, description = ?, footer = ?, color = ?, url = ?, image_url = ?, thumbnail_url = ?
-            WHERE id = ?
-        `).run(
-            name.toLowerCase(), 
-            title, 
-            description, 
-            footer, 
-            color || "#FFAA00", 
-            url, 
-            image_url, 
-            thumbnail_url, 
-            req.params.id
-        );
-
-        logAction(
-            snippet.guild_id, 
-            'SNIPPET_UPDATE', 
-            `Updated snippet: ${name}`, 
-            req.user.id, 
-            req.user.username, 
-            `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-            null,
-            null
-        );
-        
-        res.redirect('/snippets');
-    } catch (err) {
-        console.error(err);
-        res.status(500).send("Failed to update database.");
-    }
+    db.prepare(`UPDATE snippets SET name=?, title=?, description=?, footer=?, color=?, url=?, image_url=?, thumbnail_url=? WHERE id=?`).run(name.toLowerCase(), title, description, footer, color, url, image_url, thumbnail_url, req.params.id);
+    logAction(snippet.guild_id, 'SNIPPET_UPDATE', `Updated snippet: ${name}`, req.user.id, req.user.username, `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`, null, null);
+    res.redirect('/snippets');
 });
 
 app.get('/snippets/delete/:id', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
-    if (!snippet) return res.redirect('/snippets');
-
-    if (!(await canManageSnippet(req, snippet.guild_id))) { 
-        return res.status(403).send(getErrorPage("Access Denied", "Deletion sequence aborted. Required permissions not detected."));
-    }
-
+    if (!snippet || !(await canManageSnippet(req, snippet.guild_id))) return res.status(403).send("No Permission");
     db.prepare(`DELETE FROM snippets WHERE id = ?`).run(req.params.id);
-
-    logAction(
-        snippet.guild_id,
-        'SNIPPET_DELETE',
-        `Deleted snippet: ${snippet.name}`,
-        req.user.id,
-        req.user.username,
-        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-        null,
-        null
-    );
-
+    logAction(snippet.guild_id, 'SNIPPET_DELETE', `Deleted snippet: ${snippet.name}`, req.user.id, req.user.username, `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`, null, null);
     res.redirect('/snippets');
 });
 
-app.get('/snippets/toggle/:id', (req, res) => {
+app.get('/snippets/toggle/:id', async (req, res) => {
     const snippet = db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(req.params.id);
-    if (!snippet || !canManageSnippet(req, snippet)) return res.redirect('/snippets');
-
-    db.prepare(`
-        UPDATE snippets SET enabled = NOT enabled WHERE id = ?
-    `).run(snippet.id);
-
+    if (snippet && await canManageSnippet(req, snippet.guild_id)) db.prepare(`UPDATE snippets SET enabled = NOT enabled WHERE id = ?`).run(snippet.id);
     res.redirect('/snippets');
 });
 
-app.use((req, res) => {
-    res.status(404).send(getErrorPage("Page Not Found", "The system module you requested does not exist or has been moved.", "404"));
-});
+app.use((req, res) => res.status(404).send(getErrorPage("Not Found", "System Route Offline", "404")));
 
 app.listen(3000, '0.0.0.0');
 
 // --- BOT EVENTS ---
 const IMPULSE_COLOR = 0xFFAA00;
 
-client.once('clientReady', async (c) => {
+client.once('ready', async (c) => {
     console.log(`✅ Logged in as ${c.user.tag}`);
-    
-    // ONE-TIME: Scan and track threads from the last 2 weeks
-    console.log('📊 Scanning existing threads from the last 2 weeks...');
     const twoWeeksAgo = Date.now() - (14 * 24 * 60 * 60 * 1000);
-    
     const allSettings = db.prepare('SELECT * FROM guild_settings').all();
     for (const settings of allSettings) {
         try {
             const guild = client.guilds.cache.get(settings.guild_id);
             if (!guild) continue;
-            
             const forumChannel = await guild.channels.fetch(settings.forum_id).catch(() => null);
             if (!forumChannel || !forumChannel.isThreadOnly()) continue;
-            
-            // Fetch all active threads
             const threads = await forumChannel.threads.fetchActive();
-            
             for (const [threadId, thread] of threads.threads) {
-                // Only track threads created in the last 2 weeks
                 if (thread.createdTimestamp && thread.createdTimestamp >= twoWeeksAgo) {
-                    // Skip threads that already have the resolved tag
-                    if (thread.appliedTags.includes(settings.resolved_tag)) {
-                        console.log(`⏭️  Skipping resolved thread: ${thread.name}`);
-                        continue;
-                    }
-                    
-                    // Check if already being tracked
+                    if (thread.appliedTags.includes(settings.resolved_tag)) continue;
                     const existing = db.prepare('SELECT * FROM thread_tracking WHERE thread_id = ?').get(threadId);
-                    if (!existing) {
-                        db.prepare('INSERT INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)').run(
-                            threadId,
-                            settings.guild_id,
-                            thread.createdTimestamp || Date.now()
-                        );
-                        console.log(`✅ Now tracking thread: ${thread.name} (${threadId})`);
-                    }
+                    if (!existing) db.prepare('INSERT INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)').run(threadId, settings.guild_id, thread.createdTimestamp || Date.now());
                 }
             }
-        } catch (error) {
-            console.error(`Error scanning threads for guild ${settings.guild_id}:`, error);
-        }
+        } catch (error) {}
     }
-    console.log('✅ Initial thread scan complete!');
-    
-    // Timer for locking resolved threads (every 1 minute)
     setInterval(async () => {
         const rows = db.prepare('SELECT * FROM pending_locks WHERE lock_at <= ?').all(Date.now());
         for (const row of rows) {
             const settings = getSettings(row.guild_id);
-            if (!settings) continue;
             try {
                 const thread = await client.channels.fetch(row.thread_id);
                 if (thread) {
                     await thread.setAppliedTags([settings.resolved_tag]);
                     await thread.setLocked(true);
-                    
-                    const lockEmbed = new EmbedBuilder()
-                        .setTitle("🔒 Thread Locked")
-                        .setDescription("This thread has been marked as resolved and is now closed. Thank you for using our support forum!")
-                        .setColor(IMPULSE_COLOR)
-                        .setTimestamp()
-                        .setFooter({ text: "Impulse Bot • Automated Lock" });
-                    
-                    await thread.send({ embeds: [lockEmbed] });
+                    await thread.send({ embeds: [new EmbedBuilder().setTitle("🔒 Thread Locked").setDescription("This thread is now closed.").setColor(IMPULSE_COLOR)] });
                     logAction(row.guild_id, 'LOCK', `Locked thread: ${thread.name}`);
                 }
-            } catch (e) { console.error("Lock error:", e); }
+            } catch (e) {}
             db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(row.thread_id);
         }
     }, 60000);
-
-    setInterval(async () => {
-        await checkStaleThreads();
-    }, 6 * 60 * 60 * 1000);
-    
-    await checkStaleThreads();
+    setInterval(checkStaleThreads, 6 * 60 * 60 * 1000);
+    checkStaleThreads();
 });
 
 async function checkStaleThreads() {
-    console.log('🔍 Checking for stale threads...');
-    
-    // 24 days = send warning (giving 6 hours to respond)
     const warningThreshold = Date.now() - (24 * 24 * 60 * 60 * 1000);
-    // 30 days = auto-close
     const closeThreshold = Date.now() - (30 * 24 * 60 * 60 * 1000);
-    
-    // Get threads that need warnings (24+ days old, no warning sent yet)
-    const threadsNeedingWarning = db.prepare(`
-        SELECT * FROM thread_tracking 
-        WHERE created_at <= ? 
-        AND stale_warning_sent = 0
-        AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
-    `).all(warningThreshold, warningThreshold);
-    
+    const threadsNeedingWarning = db.prepare(`SELECT * FROM thread_tracking WHERE created_at <= ? AND stale_warning_sent = 0 AND (last_renewed_at IS NULL OR last_renewed_at <= ?)`).all(warningThreshold, warningThreshold);
     for (const tracked of threadsNeedingWarning) {
-        const settings = getSettings(tracked.guild_id);
-        if (!settings) continue;
-        
         try {
             const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
             if (!thread || thread.locked || thread.archived) continue;
-            
-            // Skip if thread already has resolved tag
-            if (thread.appliedTags.includes(settings.resolved_tag)) {
-                db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
-                continue;
-            }
-            
-            // Send warning to thread owner
-            const warningEmbed = new EmbedBuilder()
-                .setTitle("⚠️ Thread Inactivity Warning")
-                .setDescription(
-                    `Hey <@${thread.ownerId}>! This thread has been inactive for **24 days** and will be automatically closed in **6 hours** due to inactivity.\n\n` +
-                    `**To keep this thread open:**\n` +
-                    `• Reply to this thread, OR\n` +
-                    `• Use the \`/cancel\` command to renew it\n\n` +
-                    `If you no longer need help, you can safely ignore this message.`
-                )
-                .setColor(0xF59E0B)
-                .setTimestamp()
-                .setFooter({ text: "Impulse Bot • Stale Thread Warning" });
-            
-            await thread.send({ content: `<@${thread.ownerId}>`, embeds: [warningEmbed] });
-            
-            // Mark warning as sent
+            await thread.send({ content: `<@${thread.ownerId}>`, embeds: [new EmbedBuilder().setTitle("⚠️ Stale Warning").setDescription("Closing in 6 hours due to inactivity.").setColor(0xF59E0B)] });
             db.prepare('UPDATE thread_tracking SET stale_warning_sent = 1 WHERE thread_id = ?').run(tracked.thread_id);
-            logAction(tracked.guild_id, 'STALE_WARNING', `Sent stale warning for: ${thread.name}`);
-            
-            console.log(`⚠️  Sent stale warning for thread: ${thread.name}`);
-        } catch (error) {
-            console.error(`Error sending stale warning for thread ${tracked.thread_id}:`, error);
-        }
+        } catch (error) {}
     }
-    
-    // Get threads that should be closed (30+ days old with warning sent)
-    const threadsToClose = db.prepare(`
-        SELECT * FROM thread_tracking 
-        WHERE created_at <= ?
-        AND stale_warning_sent = 1
-        AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
-    `).all(closeThreshold, closeThreshold);
-    
+    const threadsToClose = db.prepare(`SELECT * FROM thread_tracking WHERE created_at <= ? AND stale_warning_sent = 1 AND (last_renewed_at IS NULL OR last_renewed_at <= ?)`).all(closeThreshold, closeThreshold);
     for (const tracked of threadsToClose) {
-        const settings = getSettings(tracked.guild_id);
-        if (!settings) continue;
-        
         try {
             const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
-            if (!thread || thread.locked || thread.archived) {
-                db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
-                continue;
+            if (thread && !thread.locked) {
+                await thread.setLocked(true);
+                await thread.send({ embeds: [new EmbedBuilder().setTitle("🔒 Closed").setDescription("Closed due to 30+ days of inactivity.").setColor(0x6B7280)] });
+                logAction(tracked.guild_id, 'AUTO_CLOSE', `Closed stale thread: ${thread.name}`);
             }
-            
-            // Skip if thread already has resolved tag
-            if (thread.appliedTags.includes(settings.resolved_tag)) {
-                db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
-                continue;
-            }
-            
-            await thread.setLocked(true);
-            
-            const autoCloseEmbed = new EmbedBuilder()
-                .setTitle("🔒 Thread Auto-Closed")
-                .setDescription("This thread has been automatically closed due to 30+ days of inactivity. If you still need help, please create a new thread.")
-                .setColor(0x6B7280)
-                .setTimestamp()
-                .setFooter({ text: "Impulse Bot • Auto-Close" });
-            
-            await thread.send({ embeds: [autoCloseEmbed] });
-            logAction(tracked.guild_id, 'AUTO_CLOSE', `Auto-closed stale thread: ${thread.name}`);
-            
-            // Remove from tracking
             db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(tracked.thread_id);
-            
-            console.log(`🔒 Auto-closed stale thread: ${thread.name}`);
-        } catch (error) {
-            console.error(`Error auto-closing thread ${tracked.thread_id}:`, error);
-        }
+        } catch (error) {}
     }
-    
-    console.log('✅ Stale thread check complete!');
 }
 
 client.on('threadCreate', async (thread) => {
     const settings = getSettings(thread.guildId);
     if (!settings || thread.parentId !== settings.forum_id) return;
-
-    db.prepare('INSERT OR REPLACE INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)').run(
-        thread.id,
-        thread.guildId,
-        Date.now()
-    );
-
+    db.prepare('INSERT OR REPLACE INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)').run(thread.id, thread.guildId, Date.now());
     if (settings.unanswered_tag) {
         try {
             const currentTags = thread.appliedTags || [];
-            if (!currentTags.includes(settings.unanswered_tag)) {
-                await thread.setAppliedTags([...currentTags, settings.unanswered_tag]);
-            }
-        } catch (e) {
-            console.error("Error applying unanswered tag:", e);
-        }
+            if (!currentTags.includes(settings.unanswered_tag)) await thread.setAppliedTags([...currentTags, settings.unanswered_tag]);
+        } catch (e) {}
     }
-
-    const welcomeEmbed = new EmbedBuilder()
-        .setTitle("Welcome to the Command Help Thread!")
-        .setDescription(
-            `Hey <@${thread.ownerId}>!\n\n` +
-            `**What happens next?**\n` +
-            `• A command helper will assist you shortly\n` +
-            `• Use \`/resolved\` when your issue is fixed\n` +
-            `• The thread will auto-lock 30 minutes after being marked resolved\n\n` +
-            `*Please provide as much detail as possible about your issue!*`
-        )
-        .setColor(IMPULSE_COLOR)
-        .setTimestamp()
-        .setFooter({ text: "Impulse Bot • Automated Greeting" });
-
-        await thread.send({ embeds: [welcomeEmbed] });
-    
-    logAction(
-        thread.guildId, 
-        'GREET', 
-        `Welcomed user in ${thread.name}`,
-        null,
-        null,
-        null,
-        null,
-        thread.id,
-        null
-    );
+    await thread.send({ embeds: [new EmbedBuilder().setTitle("Welcome!").setDescription("A helper will assist you shortly.").setColor(IMPULSE_COLOR)] });
 });
 
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.channel.isThread()) return;
-
+    if (message.author.bot || !message.channel.isThread()) return;
     const settings = getSettings(message.guildId);
-    
-    if (!settings || !settings.unanswered_tag) return;
-    if (message.channel.parentId !== settings.forum_id) return;
-
+    if (!settings || message.channel.parentId !== settings.forum_id) return;
     try {
         const currentTags = message.channel.appliedTags;
-        
-        // Only remove unanswered tag if:
-        // 1. The thread has the unanswered tag
-        // 2. The message is NOT from the thread owner (OP)
         if (currentTags.includes(settings.unanswered_tag) && message.author.id !== message.channel.ownerId) {
-            const newTags = currentTags.filter(tag => tag !== settings.unanswered_tag);
-            await message.channel.setAppliedTags(newTags);
-            logAction(message.guildId, 'ANSWERED', `Removed unanswered tag from: ${message.channel.name}`);
+            await message.channel.setAppliedTags(currentTags.filter(tag => tag !== settings.unanswered_tag));
         }
-    } catch (e) {
-        console.error("Error removing unanswered tag:", e);
-    }
-    
-    // Reset stale warning if thread owner replies
-    if (message.author.id === message.channel.ownerId) {
-        db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(
-            Date.now(),
-            message.channel.id
-        );
-    }
+    } catch (e) {}
+    if (message.author.id === message.channel.ownerId) db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(Date.now(), message.channel.id);
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
     if (user.bot) return;
-
     if (reaction.partial) await reaction.fetch().catch(() => null);
     if (user.partial) await user.fetch().catch(() => null);
-
-    if (reaction.emoji.name !== '🔗') return;
-    if (!reaction.message.channel.isThread()) return;
-
-    const starterMessage = await reaction.message.channel.fetchStarterMessage().catch(() => null);
-    if (!starterMessage || starterMessage.id !== reaction.message.id) return;
-
-    // Check if this thread has a link
+    if (reaction.emoji.name !== '🔗' || !reaction.message.channel.isThread()) return;
     const threadLink = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(reaction.message.channel.id);
-    
-    if (!threadLink) return; 
-
-    // ONLY remove the reaction if we are actually processing a link delivery
+    if (!threadLink) return;
+    try { await reaction.users.remove(user.id); } catch (e) {}
     try {
-        await reaction.users.remove(user.id);
+        await user.send({ embeds: [new EmbedBuilder().setTitle("🔗 Link").setDescription(`Link: ${threadLink.url}`).setColor(0x3B82F6)] });
+        logAction(threadLink.guild_id, 'LINK_ACCESSED', `${user.username} accessed link`, user.id, user.username, user.displayAvatarURL(), '🔗', reaction.message.channel.id, null);
     } catch (e) {
-        console.warn("Missing 'Manage Messages' permission to remove reaction.");
-    }
-    // Send DM to user
-    try {
-        const dmEmbed = new EmbedBuilder()
-            .setTitle("🔗 Thread Link")
-            .setDescription(
-                `You've requested the link from the thread: **${reaction.message.channel.name}**\n\n` +
-                `**Link:** ${threadLink.url}\n\n` +
-                `⚠️ **Disclaimer:** Impulse Bot is not responsible for this content. It was provided by <@${threadLink.created_by}>.`
-            )
-            .setColor(0x3B82F6)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot • Link System" });
-
-        await user.send({ embeds: [dmEmbed] });
-
-        logAction(
-            threadLink.guild_id,
-            'LINK_ACCESSED',
-            `${user.username} accessed link in: ${reaction.message.channel.name}`,
-            user.id,
-            user.username,
-            user.displayAvatarURL(),
-            'Reaction: 🔗',
-            reaction.message.channel.id,
-            null
-        );
-    } catch (error) {
-        console.log(`User ${user.tag} has DMs disabled`);
-        // Fallback: Notify the user in the thread
-        const channel = reaction.message.channel;
-        const msg = await channel.send(`<@${user.id}>, I couldn't DM you! Please enable DMs in your privacy settings.`);
-        setTimeout(() => msg.delete().catch(() => {}), 10000);
+        const m = await reaction.message.channel.send(`<@${user.id}>, enable DMs!`);
+        setTimeout(() => m.delete().catch(() => {}), 10000);
     }
 });
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     const settings = getSettings(interaction.guildId);
-
     const userId = interaction.user.id;
     const userName = interaction.user.username;
     const userAvatar = interaction.user.displayAvatarURL();
 
     if (interaction.commandName === 'setup') {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ 
-                content: "❌ **Access Denied:** Administrator permissions required.", 
-                ephemeral: true 
-            });
-        }
-        
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: "❌ No Admin", ephemeral: true });
         const forum = interaction.options.getChannel('forum');
         const resTag = interaction.options.getString('resolved_tag');
         const dupTag = interaction.options.getString('duplicate_tag');
         const unansTag = interaction.options.getString('unanswered_tag') || null;
-        const rawRoles = interaction.options.getString('helper_roles');
-        const cleanRoles = rawRoles.replace(/\s+/g, ''); 
-
-        db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, unanswered_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-            interaction.guildId, 
-            interaction.guild.name, 
-            forum.id, 
-            resTag, 
-            dupTag,
-            unansTag,
-            cleanRoles
-        );
-
-        logAction(
-            interaction.guildId, 
-            'SETUP', 
-            `Setup updated with Roles: ${cleanRoles}`,
-            userId,
-            userName,
-            userAvatar,
-            '/setup',
-            null,
-            null
-        );
-        
-        const setupEmbed = new EmbedBuilder()
-            .setTitle("✅ Setup Complete!")
-            .addFields(
-                { name: "Forum Channel", value: `<#${forum.id}>`, inline: true },
-                { name: "Helper Roles", value: cleanRoles.split(',').map(id => `<@&${id}>`).join(' '), inline: true },
-                { name: "Tags Configured", value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\`${unansTag ? `\nUnanswered: \`${unansTag}\`` : ''}`, inline: false }
-            )
-            .setColor(IMPULSE_COLOR)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot" });
-        
-        return interaction.reply({ embeds: [setupEmbed], ephemeral: true });
-    }
-
-    if (interaction.commandName === 'info') {
-        if (!settings) {
-            return interaction.reply({ 
-                content: "❌ This server hasn't been configured yet. Use `/setup` first.", 
-                ephemeral: true 
-            });
-        }
-        
-        const timerCount = db.prepare('SELECT COUNT(*) as count FROM pending_locks WHERE guild_id = ?').get(interaction.guildId).count;
-        
-        const infoEmbed = new EmbedBuilder()
-            .setTitle("Bot Configuration Status")
-            .addFields(
-                { name: "Forum Channel", value: `<#${settings.forum_id}>`, inline: true },
-                { name: "Helper Roles", value: settings.helper_role_id.split(',').map(id => `<@&${id}>`).join(', '), inline: true },
-                { name: "Active Timers", value: timerCount.toString(), inline: true },
-                { name: "Resolved Tag", value: `\`${settings.resolved_tag}\``, inline: true },
-                { name: "Duplicate Tag", value: `\`${settings.duplicate_tag}\``, inline: true }
-            )
-            .setColor(IMPULSE_COLOR)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot" });
-        
-        return interaction.reply({ embeds: [infoEmbed] });
-    }
-
-    if (!settings) {
-        return interaction.reply({ 
-            content: "❌ Please run `/setup` first.", 
-            ephemeral: true 
-        });
+        const cleanRoles = interaction.options.getString('helper_roles').replace(/\s+/g, '');
+        db.prepare(`INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, unanswered_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(interaction.guildId, interaction.guild.name, forum.id, resTag, dupTag, unansTag, cleanRoles);
+        logAction(interaction.guildId, 'SETUP', `Updated`, userId, userName, userAvatar, '/setup', null, null);
+        return interaction.reply({ content: "✅ Setup Complete", ephemeral: true });
     }
 
     if (interaction.commandName === 'resolved') {
-        const lockTime = Date.now() + (30 * 60 * 1000); // Hardcoded 30 mins
-        
-        db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(
-            interaction.channelId, 
-            interaction.guildId, 
-            lockTime
-        );
-        
-        const resolvedEmbed = new EmbedBuilder()
-            .setTitle("✅ Thread Marked as Resolved")
-            .setDescription(`This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R>.`)
-            .setColor(0x10B981)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot • Timer: 30m" });
-        
-        const reply = await interaction.reply({ embeds: [resolvedEmbed], fetchReply: true });
-
-        logAction(
-            interaction.guildId, 
-            'RESOLVED', 
-            `Marked thread for locking (30m): ${interaction.channel.name}`,
-            userId, userName, userAvatar,
-            '/resolved',
-            interaction.channelId, 
-            reply.id 
-        );
+        const lockTime = Date.now() + (30 * 60 * 1000);
+        db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(interaction.channelId, interaction.guildId, lockTime);
+        const reply = await interaction.reply({ embeds: [new EmbedBuilder().setTitle("✅ Resolved").setDescription(`Locking <t:${Math.floor(lockTime/1000)}:R>`).setColor(0x10B981)], fetchReply: true });
+        logAction(interaction.guildId, 'RESOLVED', `Marked resolved`, userId, userName, userAvatar, '/resolved', interaction.channelId, reply.id);
     }
 
     if (interaction.commandName === 'cancel') {
-        const settings = getSettings(interaction.guildId);
-        if (!settings) return interaction.reply({ content: "❌ Not configured.", ephemeral: true });
-        
         const existing = db.prepare('SELECT * FROM pending_locks WHERE thread_id = ?').get(interaction.channelId);
-        
         if (existing) {
             db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(interaction.channelId);
-            
-            const reply = await interaction.reply({ 
-                embeds: [new EmbedBuilder().setTitle("🔓 Lock Timer Cancelled").setDescription("The automatic lock has been cancelled.").setColor(0xF59E0B)],
-                fetchReply: true 
-            });
-
-            logAction(interaction.guildId, 'CANCEL', `Cancelled lock timer: ${interaction.channel.name}`, userId, userName, userAvatar, '/cancel', interaction.channelId, reply.id);
-            return; // Exit after handling
-        }
-        
-        const tracked = db.prepare('SELECT * FROM thread_tracking WHERE thread_id = ?').get(interaction.channelId);
-        
-        if (tracked && tracked.stale_warning_sent === 1) {
-            db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(Date.now(), interaction.channelId);
-            
-            const reply = await interaction.reply({ 
-                embeds: [new EmbedBuilder().setTitle("♻️ Thread Renewed").setDescription("The 30-day inactivity timer has been reset.").setColor(0x10B981)],
-                fetchReply: true 
-            });
-
-            logAction(
-                interaction.guildId,
-                'THREAD_RENEWED',
-                `Thread renewed: ${interaction.channel.name}`,
-                userId,
-                userName,
-                userAvatar,
-                '/cancel',
-                interaction.channelId,
-                reply.id
-            );
+            const reply = await interaction.reply({ content: "🔓 Cancelled", fetchReply: true });
+            logAction(interaction.guildId, 'CANCEL', `Cancelled lock`, userId, userName, userAvatar, '/cancel', interaction.channelId, reply.id);
         } else {
-            return interaction.reply({ content: "❌ There is no pending lock timer or stale warning for this thread.", ephemeral: true });
+            const tracked = db.prepare('SELECT * FROM thread_tracking WHERE thread_id = ?').get(interaction.channelId);
+            if (tracked && tracked.stale_warning_sent === 1) {
+                db.prepare('UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?').run(Date.now(), interaction.channelId);
+                const reply = await interaction.reply({ content: "♻️ Renewed", fetchReply: true });
+                logAction(interaction.guildId, 'THREAD_RENEWED', `Renewed`, userId, userName, userAvatar, '/cancel', interaction.channelId, reply.id);
+            } else return interaction.reply({ content: "❌ Nothing to cancel", ephemeral: true });
         }
     }
 
     if (interaction.commandName === 'duplicate') {
-        const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-        const isHelper = hasHelperRole(interaction.member, settings);
-
-        if (!isAdmin && !isHelper) {
-            return interaction.reply({ content: "❌ **Access Denied**", ephemeral: true });
-        }
-
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !hasHelperRole(interaction.member, settings)) return interaction.reply({ content: "❌ Denied", ephemeral: true });
         const link = interaction.options.getString('link');
-
         try {
-            const currentTags = interaction.channel.appliedTags || [];
-            const newTags = [...currentTags.filter(t => t !== settings.unanswered_tag), settings.duplicate_tag];
-            await interaction.channel.setAppliedTags(newTags);
-            
-            const duplicateEmbed = new EmbedBuilder()
-                .setTitle("🔄 Thread Closed: Duplicate")
-                .setDescription(`Original Thread: ${link}`)
-                .setColor(0x0EA5E9);
-            
-            const reply = await interaction.reply({ embeds: [duplicateEmbed], fetchReply: true });
+            const tags = interaction.channel.appliedTags || [];
+            await interaction.channel.setAppliedTags([...tags.filter(t=>t!==settings.unanswered_tag), settings.duplicate_tag]);
+            const reply = await interaction.reply({ embeds: [new EmbedBuilder().setTitle("🔄 Duplicate").setDescription(`Original: ${link}`).setColor(0x0EA5E9)], fetchReply: true });
             await interaction.channel.setLocked(true);
-            
-            logAction(interaction.guildId, 'DUPLICATE', `Closed duplicate: ${interaction.channel.name}`, userId, userName, userAvatar, `/duplicate link:${link}`, interaction.channelId, reply.id);
-        } catch (e) {
-            console.error(e);
-            if (!interaction.replied) await interaction.reply({ content: "⚠️ Permission error.", ephemeral: true });
-        }
+            logAction(interaction.guildId, 'DUPLICATE', `Duplicate closed`, userId, userName, userAvatar, `/duplicate`, interaction.channelId, reply.id);
+        } catch (e) { interaction.reply({ content: "⚠️ Error", ephemeral: true }); }
     }
 
     if (interaction.commandName === 'snippet') {
-        const userId = interaction.user.id;
-        const userName = interaction.user.username;
-        const userAvatar = `https://cdn.discordapp.com/avatars/${userId}/${interaction.user.avatar}.png`;
-
         const name = interaction.options.getString('name');
         const snippet = db.prepare(`SELECT * FROM snippets WHERE guild_id = ? AND name = ? AND enabled = 1`).get(interaction.guildId, name.toLowerCase());
-
-        if (!snippet) {
-            return interaction.reply({ 
-                content: "❌ We couldn't find the snippet you're looking for. It may have been deleted.", 
-                ephemeral: true 
-            });
-        }
-
-        try {
-            const embed = new EmbedBuilder()
-                .setTitle(parseVars(snippet.title, interaction))
-                .setURL(snippet.url || null)
-                .setDescription(parseVars(snippet.description, interaction))
-                .setColor(snippet.color || "#FFAA00")
-                .setTimestamp();
-
-            if (snippet.image_url && snippet.image_url.startsWith('http')) embed.setImage(snippet.image_url);
-            if (snippet.thumbnail_url && snippet.thumbnail_url.startsWith('http')) embed.setThumbnail(snippet.thumbnail_url);
-            if (snippet.footer) embed.setFooter({ text: parseVars(snippet.footer, interaction) });
-
-            // Parse Fields
-            try {
-                const fields = JSON.parse(snippet.fields || '[]');
-                if (fields.length > 0) {
-                    embed.addFields(fields.map(f => ({
-                        name: parseVars(f.name, interaction),
-                        value: parseVars(f.value, interaction),
-                        inline: f.inline
-                    })));
-                }
-            } catch (e) { /* silent fail on fields */ }
-
-            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`, interaction.channelId, null);
-            
-            return interaction.reply({ embeds: [embed] });
-        } catch (error) {
-            console.error("Snippet Command Error:", error);
-            return interaction.reply({ content: "❌ There was an error rendering this snippet.", ephemeral: true });
-        }
+        if (!snippet) return interaction.reply({ content: "❌ Not Found", ephemeral: true });
+        const embed = new EmbedBuilder().setTitle(parseVars(snippet.title, interaction)).setDescription(parseVars(snippet.description, interaction)).setColor(snippet.color || "#FFAA00");
+        if (snippet.image_url) embed.setImage(snippet.image_url);
+        if (snippet.thumbnail_url) embed.setThumbnail(snippet.thumbnail_url);
+        if (snippet.footer) embed.setFooter({ text: parseVars(snippet.footer, interaction) });
+        logAction(interaction.guildId, 'SNIPPET', `Used ${name}`, userId, userName, userAvatar, `/snippet`, interaction.channelId, null);
+        return interaction.reply({ embeds: [embed] });
     }
 
     if (interaction.commandName === 'link') {
-        if (!interaction.channel.isThread()) {
-            return interaction.reply({
-                content: "❌ This command can only be used in threads.",
-                ephemeral: true
-            });
-        }
-
-        if (interaction.user.id !== interaction.channel.ownerId) {
-            return interaction.reply({
-                content: "❌ Only the thread owner can add links to their thread.",
-                ephemeral: true
-            });
-        }
-
+        if (!interaction.channel.isThread() || interaction.user.id !== interaction.channel.ownerId) return interaction.reply({ content: "❌ Owner only", ephemeral: true });
         const url = interaction.options.getString('url');
-
-        try {
-            new URL(url);
-        } catch (e) {
-            return interaction.reply({
-                content: "❌ Invalid URL format. Please provide a valid URL (e.g., https://example.com)",
-                ephemeral: true
-            });
-        }
-
-        const existing = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(interaction.channelId);
-        
-        if (existing) {
-            return interaction.reply({
-                content: "❌ This thread already has a link attached. Use `/removelink` to remove it first.",
-                ephemeral: true
-            });
-        }
-
-        // Save to database
-        db.prepare(`INSERT OR REPLACE INTO thread_links (thread_id, guild_id, url, created_by, created_at) VALUES (?, ?, ?, ?, ?)`).run(
-            interaction.channelId,
-            interaction.guildId,
-            url,
-            interaction.user.id,
-            Date.now()
-        );
-
-        // Send embed message
-        const linkEmbed = new EmbedBuilder()
-            .setTitle("🔗 Link Attached to Thread")
-            .setDescription(
-                `A link has been attached to this thread by <@${interaction.user.id}>.\n\n` +
-                `**React with 🔗 on the thread's starter message to receive the link via DM.**\n\n` +
-                `⚠️ **Warning:** The bot is not responsible for where this link leads. ` +
-                `Only click if you trust the thread owner.\n\n` +
-                `*Moderators can use \`/removelink\` to remove this link.*`
-            )
-            .setColor(0x3B82F6)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot • Link System" });
-
-        await interaction.reply({ embeds: [linkEmbed] });
-
-        try {
-            const starterMessage = await interaction.channel.fetchStarterMessage();
-            if (starterMessage) {
-                await starterMessage.react('🔗');
-            }
-        } catch (error) {
-            console.error('Error reacting to starter message:', error);
-            await interaction.followUp({ 
-                content: '⚠️ Link added but could not add reaction to thread starter message.', 
-                ephemeral: true 
-            });
-        }
-
-        logAction(
-            interaction.guildId,
-            'LINK_ADDED',
-            `Link added to thread: ${interaction.channel.name}`,
-            interaction.user.id,
-            interaction.user.username,
-            interaction.user.displayAvatarURL(),
-            `/link url:${url}`,
-            interaction.channelId,
-            null
-        );
+        db.prepare(`INSERT OR REPLACE INTO thread_links (thread_id, guild_id, url, created_by, created_at) VALUES (?, ?, ?, ?, ?)`).run(interaction.channelId, interaction.guildId, url, interaction.user.id, Date.now());
+        await interaction.reply({ content: "🔗 Link added" });
+        const sm = await interaction.channel.fetchStarterMessage();
+        if (sm) await sm.react('🔗');
+        logAction(interaction.guildId, 'LINK_ADDED', `Added link`, userId, userName, userAvatar, `/link`, interaction.channelId, null);
     }
-
-    if (interaction.commandName === 'removelink') {
-            const settings = getSettings(interaction.guildId);
-            if (!settings) return interaction.reply({ content: "❌ Not configured.", ephemeral: true });
-            if (!interaction.channel.isThread()) return interaction.reply({ content: "❌ Threads only.", ephemeral: true });
-
-            const isOwner = interaction.user.id === interaction.channel.ownerId;
-            const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-            const isHelper = hasHelperRole(interaction.member, settings);
-
-            if (!isOwner && !isAdmin && !isHelper) {
-                return interaction.reply({
-                    content: "❌ You don't have permission. Only the thread owner or staff can remove links.",
-                    ephemeral: true
-                });
-            }
-
-            const link = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(interaction.channelId);
-            if (!link) return interaction.reply({ content: "❌ No link attached to this thread.", ephemeral: true });
-
-            db.prepare('DELETE FROM thread_links WHERE thread_id = ?').run(interaction.channelId);
-
-            // Remove the system reaction from the starter message
-            try {
-                const starterMessage = await interaction.channel.fetchStarterMessage();
-                const reaction = starterMessage.reactions.cache.get('🔗');
-                if (reaction) await reaction.remove(); 
-            } catch (e) { /* ignore cleanup errors */ }
-
-            await interaction.reply({ 
-                embeds: [
-                    new EmbedBuilder()
-                        .setTitle("🔗 Link Removed")
-                        .setDescription(`The link has been removed by ${isOwner ? 'the thread owner' : 'staff'}.`)
-                        .setColor(0xEF4444)
-                ] 
-            });
-    }
-
-});
-
-app.use((req, res) => {
-    res.status(404).send(getErrorPage("Module Offline", "The system route you are attempting to access does not exist.", "404"));
 });
 
 client.login(process.env.DISCORD_TOKEN);
