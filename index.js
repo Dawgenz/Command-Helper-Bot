@@ -5,7 +5,6 @@ const express = require('express');
 const passport = require('passport');
 const { Strategy } = require('passport-discord');
 const session = require('express-session');
-const { threadId } = require('worker_threads');
 const SQLiteStore = require('connect-sqlite3')(session);
 
 const db = new Database('database.db');
@@ -1917,7 +1916,7 @@ client.on('interactionCreate', async (interaction) => {
             userAvatar,
             '/setup',
             null,
-            messageId
+            null
         );
         
         const setupEmbed = new EmbedBuilder()
@@ -1968,38 +1967,33 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.commandName === 'resolved') {
-        const customMinutes = interaction.options.getInteger('minutes') || 30;
-        const lockTime = Date.now() + (customMinutes * 60 * 1000);
-        
-        db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(
-            interaction.channelId, 
-            interaction.guildId, 
-            lockTime
-        );
-        
-        logAction(
-            interaction.guildId, 
-            'RESOLVED', 
-            `Marked thread for locking in ${customMinutes}m: ${interaction.channel.name}`,
-            userId,
-            userName,
-            userAvatar,
-            `/resolved minutes:${customMinutes}`,
-            interaction.channelId,
-            reply.id
-        );
-        
-        const resolvedEmbed = new EmbedBuilder()
-            .setTitle("✅ Thread Marked as Resolved")
-            .setDescription(
-                `This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R>.\n\n` +
-                `If you need to reopen this thread or have additional questions, use \`/cancel\` before it locks or contact a moderator.`
-            )
-            .setColor(0x10B981)
-            .setTimestamp()
-            .setFooter({ text: `Impulse Bot • Locks at ${new Date(lockTime).toLocaleTimeString()}` });
-        
-        await interaction.reply({ embeds: [resolvedEmbed] });
+            const customMinutes = interaction.options.getInteger('minutes') || 30;
+            const lockTime = Date.now() + (customMinutes * 60 * 1000);
+            
+            db.prepare('INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)').run(
+                interaction.channelId, 
+                interaction.guildId, 
+                lockTime
+            );
+            
+            const resolvedEmbed = new EmbedBuilder()
+                .setTitle("✅ Thread Marked as Resolved")
+                .setDescription(`This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R>.`)
+                .setColor(0x10B981)
+                .setTimestamp();
+            
+            // FIX: Capture the reply so we have the message ID
+            const reply = await interaction.reply({ embeds: [resolvedEmbed], fetchReply: true });
+
+            logAction(
+                interaction.guildId, 
+                'RESOLVED', 
+                `Marked thread for locking: ${interaction.channel.name}`,
+                userId, userName, userAvatar,
+                `/resolved minutes:${customMinutes}`,
+                interaction.channelId, // The thread ID
+                reply.id // The message ID
+            );
     }
 
     if (interaction.commandName === 'cancel') {
@@ -2088,42 +2082,33 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        const link = interaction.options.getString('link');
+        const link = interaction.options.getRaw('link') || interaction.options.getString('link');
         
         try {
             await interaction.channel.setAppliedTags([settings.duplicate_tag]);
             
             const duplicateEmbed = new EmbedBuilder()
                 .setTitle("🔄 Thread Closed: Duplicate")
-                .setDescription(
-                    `This topic has already been addressed in another thread.\n\n` +
-                    `**Original Thread:** ${link}\n\n` +
-                    `Please refer to the linked thread for the solution. This thread will now be locked.`
-                )
-                .setColor(0x0EA5E9)
-                .setTimestamp()
-                .setFooter({ text: "Impulse Bot • Duplicate Detection" });
+                .setDescription(`Original Thread: ${link}`)
+                .setColor(0x0EA5E9);
             
-            await interaction.reply({ embeds: [duplicateEmbed] });
+            const reply = await interaction.reply({ embeds: [duplicateEmbed], fetchReply: true });
             await interaction.channel.setLocked(true);
             
             logAction(
                 interaction.guildId, 
                 'DUPLICATE', 
                 `Closed duplicate: ${interaction.channel.name}`,
-                userId,
-                userName,
-                userAvatar,
+                userId, userName, userAvatar,
                 `/duplicate link:${link}`,
-                threadId,
-                messageId
+                interaction.channelId,
+                reply.id
             );
         } catch (e) {
             console.error(e);
-            interaction.followUp({ 
-                content: "⚠️ Failed to apply tags/lock. Check bot permissions.", 
-                ephemeral: true 
-            });
+            if (!interaction.replied) {
+                await interaction.reply({ content: "⚠️ Permission error.", ephemeral: true });
+            }
         }
     }
 
@@ -2163,7 +2148,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
             } catch (e) { /* silent fail on fields */ }
 
-            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`, threadId, messageId);
+            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`, null, null);
             
             return interaction.reply({ embeds: [embed] });
         } catch (error) {
