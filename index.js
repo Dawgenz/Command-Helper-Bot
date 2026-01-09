@@ -326,18 +326,33 @@ const getActionColor = (action) => {
 };
 
 async function getManagedGuilds(userId) {
-    const member =
-        guild.members.cache.get(userId) ||
-        await guild.members.fetch(userId).catch(() => null);
+    const allowedGuilds = [];
 
-    if (!member) return false;
-    return client.guilds.cache.filter(guild => {      
-        const settings = getSettings(guild.id);
-        const isHandler = hasHelperRole(member, settings);
-        const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
-        return isHandler || isAdmin;
-    }).map(guild => guild.id);
+    for (const guild of client.guilds.cache.values()) {
+        let member;
+
+        try {
+            member =
+                guild.members.cache.get(userId) ||
+                await guild.members.fetch(userId);
+        } catch {
+            continue; // user not in this guild
+        }
+
+        if (
+            member.permissions.has('Administrator') ||
+            member.permissions.has('ManageGuild')
+        ) {
+            allowedGuilds.push({
+                id: guild.id,
+                name: guild.name
+            });
+        }
+    }
+
+    return allowedGuilds;
 }
+
 
 app.get('/', async (req, res) => {
     if (!req.isAuthenticated()) {
