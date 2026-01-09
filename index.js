@@ -5,6 +5,7 @@ const express = require('express');
 const passport = require('passport');
 const { Strategy } = require('passport-discord');
 const session = require('express-session');
+const { threadId } = require('worker_threads');
 const SQLiteStore = require('connect-sqlite3')(session);
 
 const db = new Database('database.db');
@@ -1380,7 +1381,9 @@ app.post('/snippets/new', express.urlencoded({ extended: true }), async (req, re
             req.user.id, 
             req.user.username, 
             `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-            '/snippet'
+            '/snippet',
+            threadId, 
+            messageId
         );
 
         res.redirect('/snippets');
@@ -1533,7 +1536,9 @@ app.post('/snippets/edit/:id', express.urlencoded({ extended: true }), async (re
             `Updated snippet: ${name}`, 
             req.user.id, 
             req.user.username, 
-            `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`
+            `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
+            threadId,
+            messageId
         );
         
         res.redirect('/snippets');
@@ -1561,7 +1566,9 @@ app.get('/snippets/delete/:id', (req, res) => {
         `Deleted snippet: ${snippet.name}`,
         req.user.id,
         req.user.username,
-        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`
+        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
+        threadId,
+        messageId
     );
 
     res.redirect('/snippets');
@@ -1949,7 +1956,9 @@ client.on('interactionCreate', async (interaction) => {
             userId,
             userName,
             userAvatar,
-            '/setup'
+            '/setup',
+            null,
+            messageId
         );
         
         const setupEmbed = new EmbedBuilder()
@@ -2056,7 +2065,9 @@ client.on('interactionCreate', async (interaction) => {
                 userId,
                 userName,
                 userAvatar,
-                '/cancel'
+                '/cancel',
+                threadId,
+                messageId
             );
             
             const cancelEmbed = new EmbedBuilder()
@@ -2086,7 +2097,9 @@ client.on('interactionCreate', async (interaction) => {
                 userId,
                 userName,
                 userAvatar,
-                '/cancel'
+                '/cancel',
+                threadId,
+                messageId
             );
             
             const renewEmbed = new EmbedBuilder()
@@ -2142,7 +2155,9 @@ client.on('interactionCreate', async (interaction) => {
                 userId,
                 userName,
                 userAvatar,
-                `/duplicate link:${link}`
+                `/duplicate link:${link}`,
+                threadId,
+                messageId
             );
         } catch (e) {
             console.error(e);
@@ -2189,7 +2204,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
             } catch (e) { /* silent fail on fields */ }
 
-            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`);
+            logAction(interaction.guildId, 'SNIPPET', `Used snippet: ${name}`, userId, userName, userAvatar, `/snippet name:${name}`, threadId, messageId);
             
             return interaction.reply({ embeds: [embed] });
         } catch (error) {
@@ -2259,7 +2274,9 @@ client.on('interactionCreate', async (interaction) => {
         interaction.user.id,
         interaction.user.username,
         interaction.user.displayAvatarURL(),
-        `/link url:${url}`
+        `/link url:${url}`,
+        threadId,
+        message.id
     );
 }
 
