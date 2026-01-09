@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder, Partials } = require('discord.js');
 const Database = require('better-sqlite3');
 const express = require('express');
 const passport = require('passport');
@@ -15,7 +15,14 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessageReactions, // Added for the link reaction
+        GatewayIntentBits.DirectMessages         // Added for DMing the link
+    ],
+    partials: [
+        Partials.Message, 
+        Partials.Reaction, 
+        Partials.User
     ]
 });
 db.prepare(`CREATE TABLE IF NOT EXISTS guild_settings (
@@ -1873,7 +1880,16 @@ client.on('messageReactionAdd', async (reaction, user) => {
             return;
         }
     }
-
+    
+    // Ensure the user object is fully populated
+    if (user.partial) {
+        try {
+            await user.fetch();
+        } catch (error) {
+            console.error('Error fetching user:', error);
+            return;
+        }
+    }
 
     if (reaction.emoji.name !== '🔗') return;
     if (!reaction.message.channel.isThread()) return;
@@ -1881,21 +1897,18 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const starterMessage = await reaction.message.channel.fetchStarterMessage().catch(() => null);
     if (!starterMessage || starterMessage.id !== reaction.message.id) return;
 
-    // Check if this thread has a link
     const threadLink = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(reaction.message.channel.id);
-    if (!threadLink) {
-        // Remove reaction if no link exists
-        try {
-            await reaction.users.remove(user.id);
-        } catch (e) {}
-        return;
-    }
-
+    
+    // Attempt to remove the reaction (Requires "Manage Messages" Permission)
     try {
         await reaction.users.remove(user.id);
     } catch (error) {
-        console.error('Error removing reaction:', error);
+        // This is where your log error "50013" comes from. 
+        // We log it but continue so the user still gets their DM.
+        console.warn('Could not remove reaction (Missing Manage Messages permission)');
     }
+
+    if (!threadLink) return;
 
     // Send DM to user
     try {
@@ -1904,8 +1917,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
             .setDescription(
                 `You've requested the link from the thread: **${reaction.message.channel.name}**\n\n` +
                 `**Link:** ${threadLink.url}\n\n` +
-                `⚠️ **Disclaimer:** Impulse Bot is not responsible for the content at this link. ` +
-                `This link was provided by the thread owner (<@${threadLink.created_by}>). Click at your own discretion.`
+                `⚠️ **Disclaimer:** Impulse Bot is not responsible for this content. It was provided by <@${threadLink.created_by}>.`
             )
             .setColor(0x3B82F6)
             .setTimestamp()
@@ -1913,7 +1925,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
         await user.send({ embeds: [dmEmbed] });
 
-        // Log that user received the link
         logAction(
             threadLink.guild_id,
             'LINK_ACCESSED',
@@ -1926,19 +1937,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
             null
         );
     } catch (error) {
-        console.log(`User ${user.tag} likely has DMs disabled`);
-        
-        try {
-            const channel = await client.channels.fetch(reaction.message.channel.id);
-            await channel.send({
-                content: `<@${user.id}> I couldn't send you the link via DM. Please enable DMs from server members and try again.`,
-                allowedMentions: { users: [user.id] }
-            }).then(msg => {
-                setTimeout(() => msg.delete().catch(() => {}), 10000);
-            });
-        } catch (e) {
-            console.error('Could not send DM disabled notice:', e);
-        }
+        console.log(`User ${user.tag} has DMs disabled`);
+        // Fallback: Notify the user in the thread
+        const channel = reaction.message.channel;
+        const msg = await channel.send(`<@${user.id}>, I couldn't DM you! Please enable DMs in your privacy settings.`);
+        setTimeout(() => msg.delete().catch(() => {}), 10000);
     }
 });
 
