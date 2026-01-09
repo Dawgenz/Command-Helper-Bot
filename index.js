@@ -311,7 +311,8 @@ const getActionColor = (action) => {
         'STALE_WARNING': 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
         'THREAD_RENEWED': 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
         'LINK_ADDED': 'bg-blue-600/10 text-blue-600 border-blue-600/20',
-        'LINK_ACCESSED': 'bg-purple-500/10 text-purple-500 border-purple-500/20'
+        'LINK_ACCESSED': 'bg-purple-500/10 text-purple-500 border-purple-500/20',
+        'LINK_REMOVED': 'bg-red-500/10 text-red-500 border-red-500/20'
     };
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
@@ -1873,11 +1874,22 @@ client.on('messageReactionAdd', async (reaction, user) => {
         }
     }
 
+
     if (reaction.emoji.name !== '🔗') return;
     if (!reaction.message.channel.isThread()) return;
 
+    const starterMessage = await reaction.message.channel.fetchStarterMessage().catch(() => null);
+    if (!starterMessage || starterMessage.id !== reaction.message.id) return;
+
+    // Check if this thread has a link
     const threadLink = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(reaction.message.channel.id);
-    if (!threadLink) return;
+    if (!threadLink) {
+        // Remove reaction if no link exists
+        try {
+            await reaction.users.remove(user.id);
+        } catch (e) {}
+        return;
+    }
 
     try {
         await reaction.users.remove(user.id);
@@ -1893,7 +1905,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
                 `You've requested the link from the thread: **${reaction.message.channel.name}**\n\n` +
                 `**Link:** ${threadLink.url}\n\n` +
                 `⚠️ **Disclaimer:** Impulse Bot is not responsible for the content at this link. ` +
-                `This link was provided by the thread owner. Click at your own discretion.`
+                `This link was provided by the thread owner (<@${threadLink.created_by}>). Click at your own discretion.`
             )
             .setColor(0x3B82F6)
             .setTimestamp()
@@ -1901,6 +1913,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
         await user.send({ embeds: [dmEmbed] });
 
+        // Log that user received the link
         logAction(
             threadLink.guild_id,
             'LINK_ACCESSED',
@@ -1908,11 +1921,24 @@ client.on('messageReactionAdd', async (reaction, user) => {
             user.id,
             user.username,
             user.displayAvatarURL(),
-            'Reaction: 🔗'
+            'Reaction: 🔗',
+            reaction.message.channel.id,
+            null
         );
     } catch (error) {
-        console.error(`Could not DM user ${user.tag}:`, error);
         console.log(`User ${user.tag} likely has DMs disabled`);
+        
+        try {
+            const channel = await client.channels.fetch(reaction.message.channel.id);
+            await channel.send({
+                content: `<@${user.id}> I couldn't send you the link via DM. Please enable DMs from server members and try again.`,
+                allowedMentions: { users: [user.id] }
+            }).then(msg => {
+                setTimeout(() => msg.delete().catch(() => {}), 10000);
+            });
+        } catch (e) {
+            console.error('Could not send DM disabled notice:', e);
+        }
     }
 });
 
@@ -2214,6 +2240,101 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.commandName === 'link') {
+        if (!interaction.channel.isThread()) {
+            return interaction.reply({
+                content: "❌ This command can only be used in threads.",
+                ephemeral: true
+            });
+        }
+
+        if (interaction.user.id !== interaction.channel.ownerId) {
+            return interaction.reply({
+                content: "❌ Only the thread owner can add links to their thread.",
+                ephemeral: true
+            });
+        }
+
+        const url = interaction.options.getString('url');
+
+        try {
+            new URL(url);
+        } catch (e) {
+            return interaction.reply({
+                content: "❌ Invalid URL format. Please provide a valid URL (e.g., https://example.com)",
+                ephemeral: true
+            });
+        }
+
+        const existing = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(interaction.channelId);
+        
+        if (existing) {
+            return interaction.reply({
+                content: "❌ This thread already has a link attached. Use `/removelink` to remove it first.",
+                ephemeral: true
+            });
+        }
+
+        // Save to database
+        db.prepare(`INSERT OR REPLACE INTO thread_links (thread_id, guild_id, url, created_by, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+            interaction.channelId,
+            interaction.guildId,
+            url,
+            interaction.user.id,
+            Date.now()
+        );
+
+        // Send embed message
+        const linkEmbed = new EmbedBuilder()
+            .setTitle("🔗 Link Attached to Thread")
+            .setDescription(
+                `A link has been attached to this thread by <@${interaction.user.id}>.\n\n` +
+                `**React with 🔗 on the thread's starter message to receive the link via DM.**\n\n` +
+                `⚠️ **Warning:** The bot is not responsible for where this link leads. ` +
+                `Only click if you trust the thread owner.\n\n` +
+                `*Moderators can use \`/removelink\` to remove this link.*`
+            )
+            .setColor(0x3B82F6)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot • Link System" });
+
+        await interaction.reply({ embeds: [linkEmbed] });
+
+        try {
+            const starterMessage = await interaction.channel.fetchStarterMessage();
+            if (starterMessage) {
+                await starterMessage.react('🔗');
+            }
+        } catch (error) {
+            console.error('Error reacting to starter message:', error);
+            await interaction.followUp({ 
+                content: '⚠️ Link added but could not add reaction to thread starter message.', 
+                ephemeral: true 
+            });
+        }
+
+        logAction(
+            interaction.guildId,
+            'LINK_ADDED',
+            `Link added to thread: ${interaction.channel.name}`,
+            interaction.user.id,
+            interaction.user.username,
+            interaction.user.displayAvatarURL(),
+            `/link url:${url}`,
+            interaction.channelId,
+            null
+        );
+    }
+
+    if (interaction.commandName === 'removelink') {
+    const settings = getSettings(interaction.guildId);
+    
+    if (!settings) {
+        return interaction.reply({
+            content: "❌ This server hasn't been configured yet.",
+            ephemeral: true
+        });
+    }
+
     if (!interaction.channel.isThread()) {
         return interaction.reply({
             content: "❌ This command can only be used in threads.",
@@ -2221,64 +2342,69 @@ client.on('interactionCreate', async (interaction) => {
         });
     }
 
-    if (interaction.user.id !== interaction.channel.ownerId) {
+    // Check permissions: Thread owner, Helper, or Admin
+    const isOwner = interaction.user.id === interaction.channel.ownerId;
+    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+    const isHelper = hasHelperRole(interaction.member, settings);
+
+    if (!isOwner && !isAdmin && !isHelper) {
         return interaction.reply({
-            content: "❌ Only the thread owner can add links to their thread.",
+            content: "❌ Only the thread owner, helpers, or administrators can remove links.",
             ephemeral: true
         });
     }
 
-    const url = interaction.options.getString('url');
+    // Check if link exists
+    const link = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(interaction.channelId);
+    
+    if (!link) {
+        return interaction.reply({
+            content: "❌ This thread doesn't have a link attached.",
+            ephemeral: true
+        });
+    }
 
+    // Remove from database
+    db.prepare('DELETE FROM thread_links WHERE thread_id = ?').run(interaction.channelId);
+
+    // Remove reaction from starter message
     try {
-        new URL(url);
-    } catch (e) {
-        return interaction.reply({
-            content: "❌ Invalid URL format. Please provide a valid URL (e.g., https://example.com)",
-            ephemeral: true
-        });
+        const starterMessage = await interaction.channel.fetchStarterMessage();
+        if (starterMessage) {
+            const reactions = starterMessage.reactions.cache.get('🔗');
+            if (reactions) {
+                await reactions.remove();
+            }
+        }
+    } catch (error) {
+        console.error('Error removing reaction:', error);
     }
 
-    // Save to database
-    db.prepare(`INSERT OR REPLACE INTO thread_links (thread_id, guild_id, url, created_by, created_at) VALUES (?, ?, ?, ?, ?)`).run(
-        interaction.channelId,
-        interaction.guildId,
-        url,
-        interaction.user.id,
-        Date.now()
-    );
-
-    // Send message with chain reaction
-    const linkEmbed = new EmbedBuilder()
-        .setTitle("🔗 Link Attached")
+    const removeEmbed = new EmbedBuilder()
+        .setTitle("🔗 Link Removed")
         .setDescription(
-            `A link has been attached to this thread by the thread owner.\n\n` +
-            `**React with 🔗 to receive the link via DM.**\n\n` +
-            `⚠️ **Warning:** The bot is not responsible for where this link leads. ` +
-            `Only click if you trust the thread owner.`
+            `The link has been removed from this thread by ${isOwner ? 'the thread owner' : 'a moderator'}.\n\n` +
+            `Removed by: <@${interaction.user.id}>`
         )
-        .setColor(0x3B82F6)
+        .setColor(0xEF4444)
         .setTimestamp()
         .setFooter({ text: "Impulse Bot • Link System" });
 
-    const message = await interaction.reply({ embeds: [linkEmbed], fetchReply: true });
-
-    // Add chain reaction
-    await message.react('🔗');
+    await interaction.reply({ embeds: [removeEmbed] });
 
     // Log the action
     logAction(
         interaction.guildId,
-        'LINK_ADDED',
-        `Link added to thread: ${interaction.channel.name}`,
+        'LINK_REMOVED',
+        `Link removed from thread: ${interaction.channel.name}`,
         interaction.user.id,
         interaction.user.username,
         interaction.user.displayAvatarURL(),
-        `/link url:${url}`,
-        threadId,
-        message.id
+        '/removelink',
+        interaction.channelId,
+        null
     );
-}
+    }
 
 });
 

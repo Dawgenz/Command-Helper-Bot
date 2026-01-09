@@ -13,7 +13,7 @@ const commands = [
                 .setMinValue(1)
                 .setMaxValue(1440)),
     
-    // CANCEL COMMAND - New command to cancel pending locks
+    // CANCEL COMMAND
     new SlashCommandBuilder()
         .setName('cancel')
         .setDescription('Cancel the automatic lock timer for this thread'),
@@ -34,22 +34,27 @@ const commands = [
 
     // SNIPPET COMMAND
     new SlashCommandBuilder()
-    .setName('snippet')
-    .setDescription('Send a saved embed snippet')
-    .addStringOption(option =>
-        option
-            .setName('name')
-            .setDescription('Snippet name')
-            .setRequired(true)
-    ),
+        .setName('snippet')
+        .setDescription('Send a saved embed snippet')
+        .addStringOption(option =>
+            option.setName('name')
+                .setDescription('Snippet name')
+                .setRequired(true)
+        ),
 
+    // LINK COMMAND
     new SlashCommandBuilder()
-    .setName('link')
-    .setDescription('Add a clickable link to your thread (OP only)')
-    .addStringOption(option =>
-        option.setName('url')
-            .setDescription('The URL to attach to this thread')
-            .setRequired(true)),
+        .setName('link')
+        .setDescription('Add a clickable link to your thread (OP only)')
+        .addStringOption(option =>
+            option.setName('url')
+                .setDescription('The URL to attach to this thread')
+                .setRequired(true)),
+
+    // REMOVELINK COMMAND (NEW!)
+    new SlashCommandBuilder()
+        .setName('removelink')
+        .setDescription('Remove the link attached to this thread (Owner/Mods only)'),
 
     // SETUP COMMAND
     new SlashCommandBuilder()
