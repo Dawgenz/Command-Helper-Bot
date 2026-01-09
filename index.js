@@ -34,7 +34,9 @@ db.prepare(`CREATE TABLE IF NOT EXISTS thread_tracking (
     stale_warning_sent INTEGER DEFAULT 0,
     last_renewed_at INTEGER
 )`).run();
+
 db.prepare('CREATE TABLE IF NOT EXISTS pending_locks (thread_id TEXT PRIMARY KEY, guild_id TEXT, lock_at INTEGER)').run();
+
 db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, 
     guild_id TEXT, 
@@ -46,6 +48,7 @@ db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (
     command_used TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )`).run();
+
 db.prepare(`
 CREATE TABLE IF NOT EXISTS snippets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +67,14 @@ CREATE TABLE IF NOT EXISTS snippets (
 )
 `).run();
 
+db.prepare(`CREATE TABLE IF NOT EXISTS thread_links (
+    thread_id TEXT PRIMARY KEY,
+    guild_id TEXT,
+    url TEXT,
+    created_by TEXT,
+    created_at INTEGER
+)`).run();
+
 try {
     db.prepare(`ALTER TABLE snippets ADD COLUMN url TEXT`).run();
     db.prepare(`ALTER TABLE snippets ADD COLUMN image_url TEXT`).run();
@@ -71,6 +82,11 @@ try {
 } catch (e) {
     // Columns already exist
 }
+
+try {
+    db.prepare(`ALTER TABLE audit_logs ADD COLUMN thread_id TEXT`).run();
+    db.prepare(`ALTER TABLE audit_logs ADD COLUMN message_id TEXT`).run();
+} catch (e) { /* Columns exist */ }
 
 try {
     db.prepare(`ALTER TABLE guild_settings ADD COLUMN unanswered_tag TEXT`).run();
@@ -122,15 +138,17 @@ function getNav(activePage, user) {
     `;
 }
 
-const logAction = (guildId, action, details, userId = null, userName = null, userAvatar = null, command = null) => {
-    db.prepare('INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+const logAction = (guildId, action, details, userId = null, userName = null, userAvatar = null, command = null, threadId = null, messageId = null) => {
+    db.prepare('INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used, thread_id, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
         guildId, 
         action, 
         details, 
         userId, 
         userName, 
         userAvatar, 
-        command
+        command,
+        threadId,
+        messageId
     );
 };
 
@@ -186,6 +204,27 @@ function getErrorPage(title, message, code = "403") {
     </body>
     </html>
     `;
+}
+
+function getDiscordLink(guildId, channelId, messageId = null) {
+    if (messageId) {
+        return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
+    }
+    return `https://discord.com/channels/${guildId}/${channelId}`;
+}
+
+function getReadableName(channelId, guildId) {
+    try {
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) return `Channel ${channelId.slice(-4)}`;
+        
+        const channel = guild.channels.cache.get(channelId);
+        if (!channel) return `Channel ${channelId.slice(-4)}`;
+        
+        return channel.name;
+    } catch (e) {
+        return `Channel ${channelId.slice(-4)}`;
+    }
 }
 
 // --- PASSPORT / OAUTH2 CONFIG ---
@@ -269,7 +308,9 @@ const getActionColor = (action) => {
         'ANSWERED': 'bg-green-500/10 text-green-500 border-green-500/20',
         'AUTO_CLOSE': 'bg-gray-500/10 text-gray-500 border-gray-500/20',
         'STALE_WARNING': 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-        'THREAD_RENEWED': 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20'
+        'THREAD_RENEWED': 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
+        'LINK_ADDED': 'bg-blue-600/10 text-blue-600 border-blue-600/20',
+        'LINK_ACCESSED': 'bg-purple-500/10 text-purple-500 border-purple-500/20'
     };
     return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700';
 };
@@ -542,7 +583,6 @@ app.get('/logs', async (req, res) => {
 
     const filterAction = req.query.action;
     const filterGuild = req.query.guild;
-
     const managedGuildIds = getManagedGuilds(req.user.id);
 
     if (managedGuildIds.length === 0) {
@@ -557,40 +597,42 @@ app.get('/logs', async (req, res) => {
         params.push(filterAction);
     }
     
-    if (filterGuild) {
-        if (managedGuildIds.includes(filterGuild)) {
-            query += " AND guild_id = ?";
-            params.push(filterGuild);
-        }
+    if (filterGuild && managedGuildIds.includes(filterGuild)) {
+        query += " AND guild_id = ?";
+        params.push(filterGuild);
     }
 
     query += " ORDER BY timestamp DESC LIMIT 100";
 
     const rawLogs = db.prepare(query).all(...params);
+    
     const logs = rawLogs.map(log => {
         const guild = client.guilds.cache.get(log.guild_id);
+        let contextLink = null;
+        let readableContext = null;
+        
+        if (log.thread_id && log.message_id) {
+            contextLink = getDiscordLink(log.guild_id, log.thread_id, log.message_id);
+            readableContext = getReadableName(log.thread_id, log.guild_id);
+        } else if (log.thread_id) {
+            contextLink = getDiscordLink(log.guild_id, log.thread_id);
+            readableContext = getReadableName(log.thread_id, log.guild_id);
+        }
+        
         return {
             ...log,
-            displayName: guild ? guild.name : `ID: ${log.guild_id}`,
+            displayName: guild ? guild.name : `Server ${log.guild_id.slice(-4)}`,
+            contextLink,
+            readableContext,
             actionStyle: getActionColor(log.action)
         };
     });
 
     const allActions = [
-        'SNIPPET_CREATE', 
-        'SNIPPET_UPDATE', 
-        'SNIPPET_DELETE', 
-        'SNIPPET',
-        'LOCK', 
-        'CANCEL',
-        'GREET',
-        'DUPLICATE',
-        'SETUP', 
-        'RESOLVED',
-        'ANSWERED',
-        'AUTO_CLOSE',
-        'STALE_WARNING',
-        'THREAD_RENEWED'
+        'SNIPPET_CREATE', 'SNIPPET_UPDATE', 'SNIPPET_DELETE', 'SNIPPET',
+        'LOCK', 'CANCEL', 'GREET', 'DUPLICATE', 'SETUP', 'RESOLVED',
+        'ANSWERED', 'AUTO_CLOSE', 'STALE_WARNING', 'THREAD_RENEWED',
+        'LINK_ADDED', 'LINK_ACCESSED'
     ];
     
     const managedGuilds = managedGuildIds.map(id => {
@@ -652,6 +694,7 @@ app.get('/logs', async (req, res) => {
                                 <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Timestamp</th>
                                 <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Source</th>
                                 <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Action</th>
+                                <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Context</th>
                                 <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">User</th>
                                 <th class="p-4 text-[10px] font-black uppercase text-slate-500 tracking-widest">Details</th>
                             </tr>
@@ -688,6 +731,16 @@ app.get('/logs', async (req, res) => {
                                         </span>
                                     </td>
                                     <td class="p-4">
+                                        ${l.contextLink ? `
+                                            <a href="${l.contextLink}" target="_blank" class="flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 transition group">
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                                                </svg>
+                                                <span class="truncate max-w-[120px]" title="${l.readableContext}">${l.readableContext}</span>
+                                            </a>
+                                        ` : '<span class="text-xs text-slate-600">—</span>'}
+                                    </td>
+                                    <td class="p-4">
                                         <div class="flex items-center gap-2">
                                             <img src="${l.user_avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" 
                                                  class="w-6 h-6 rounded-full border border-slate-700">
@@ -710,7 +763,7 @@ app.get('/logs', async (req, res) => {
                                 </tr>
                             `}).join('') : `
                                 <tr>
-                                    <td colspan="5" class="p-8 text-center text-slate-500">
+                                    <td colspan="6" class="p-8 text-center text-slate-500">
                                         <div class="flex flex-col items-center gap-3">
                                             <svg class="w-12 h-12 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -1721,8 +1774,6 @@ async function checkStaleThreads() {
 
 client.on('threadCreate', async (thread) => {
     const settings = getSettings(thread.guildId);
-    
-    // CRITICAL: Only run if setup is complete
     if (!settings || thread.parentId !== settings.forum_id) return;
 
     // Track thread creation time for auto-closing
@@ -1755,11 +1806,21 @@ client.on('threadCreate', async (thread) => {
         .setTimestamp()
         .setFooter({ text: "Impulse Bot • Automated Greeting" });
 
-    await thread.send({ embeds: [welcomeEmbed] });
-    logAction(thread.guildId, 'GREET', `Welcomed user in ${thread.name}`);
+        await thread.send({ embeds: [welcomeEmbed] });
+    
+    logAction(
+        thread.guildId, 
+        'GREET', 
+        `Welcomed user in ${thread.name}`,
+        null,
+        null,
+        null,
+        null,
+        thread.id,
+        null
+    );
 });
 
-// Remove unanswered tag when a non-bot user replies
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.channel.isThread()) return;
@@ -1790,6 +1851,61 @@ client.on('messageCreate', async (message) => {
             Date.now(),
             message.channel.id
         );
+    }
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+    if (user.bot) return;
+
+    if (reaction.partial) {
+        try {
+            await reaction.fetch();
+        } catch (error) {
+            console.error('Error fetching reaction:', error);
+            return;
+        }
+    }
+
+    if (reaction.emoji.name !== '🔗') return;
+    if (!reaction.message.channel.isThread()) return;
+
+    const threadLink = db.prepare('SELECT * FROM thread_links WHERE thread_id = ?').get(reaction.message.channel.id);
+    if (!threadLink) return;
+
+    try {
+        await reaction.users.remove(user.id);
+    } catch (error) {
+        console.error('Error removing reaction:', error);
+    }
+
+    // Send DM to user
+    try {
+        const dmEmbed = new EmbedBuilder()
+            .setTitle("🔗 Thread Link")
+            .setDescription(
+                `You've requested the link from the thread: **${reaction.message.channel.name}**\n\n` +
+                `**Link:** ${threadLink.url}\n\n` +
+                `⚠️ **Disclaimer:** Impulse Bot is not responsible for the content at this link. ` +
+                `This link was provided by the thread owner. Click at your own discretion.`
+            )
+            .setColor(0x3B82F6)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot • Link System" });
+
+        await user.send({ embeds: [dmEmbed] });
+
+        logAction(
+            threadLink.guild_id,
+            'LINK_ACCESSED',
+            `${user.username} accessed link in: ${reaction.message.channel.name}`,
+            user.id,
+            user.username,
+            user.displayAvatarURL(),
+            'Reaction: 🔗'
+        );
+    } catch (error) {
+        console.error(`Could not DM user ${user.tag}:`, error);
+        console.log(`User ${user.tag} likely has DMs disabled`);
     }
 });
 
@@ -1900,7 +2016,9 @@ client.on('interactionCreate', async (interaction) => {
             userId,
             userName,
             userAvatar,
-            `/resolved minutes:${customMinutes}`
+            `/resolved minutes:${customMinutes}`,
+            interaction.channelId,
+            reply.id
         );
         
         const resolvedEmbed = new EmbedBuilder()
@@ -2079,6 +2197,71 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: "❌ There was an error rendering this snippet.", ephemeral: true });
         }
     }
+
+    if (interaction.commandName === 'link') {
+    if (!interaction.channel.isThread()) {
+        return interaction.reply({
+            content: "❌ This command can only be used in threads.",
+            ephemeral: true
+        });
+    }
+
+    if (interaction.user.id !== interaction.channel.ownerId) {
+        return interaction.reply({
+            content: "❌ Only the thread owner can add links to their thread.",
+            ephemeral: true
+        });
+    }
+
+    const url = interaction.options.getString('url');
+
+    try {
+        new URL(url);
+    } catch (e) {
+        return interaction.reply({
+            content: "❌ Invalid URL format. Please provide a valid URL (e.g., https://example.com)",
+            ephemeral: true
+        });
+    }
+
+    // Save to database
+    db.prepare(`INSERT OR REPLACE INTO thread_links (thread_id, guild_id, url, created_by, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+        interaction.channelId,
+        interaction.guildId,
+        url,
+        interaction.user.id,
+        Date.now()
+    );
+
+    // Send message with chain reaction
+    const linkEmbed = new EmbedBuilder()
+        .setTitle("🔗 Link Attached")
+        .setDescription(
+            `A link has been attached to this thread by the thread owner.\n\n` +
+            `**React with 🔗 to receive the link via DM.**\n\n` +
+            `⚠️ **Warning:** The bot is not responsible for where this link leads. ` +
+            `Only click if you trust the thread owner.`
+        )
+        .setColor(0x3B82F6)
+        .setTimestamp()
+        .setFooter({ text: "Impulse Bot • Link System" });
+
+    const message = await interaction.reply({ embeds: [linkEmbed], fetchReply: true });
+
+    // Add chain reaction
+    await message.react('🔗');
+
+    // Log the action
+    logAction(
+        interaction.guildId,
+        'LINK_ADDED',
+        `Link added to thread: ${interaction.channel.name}`,
+        interaction.user.id,
+        interaction.user.username,
+        interaction.user.displayAvatarURL(),
+        `/link url:${url}`
+    );
+}
 
 });
 

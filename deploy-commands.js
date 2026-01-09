@@ -43,6 +43,14 @@ const commands = [
             .setRequired(true)
     ),
 
+    new SlashCommandBuilder()
+    .setName('link')
+    .setDescription('Add a clickable link to your thread (OP only)')
+    .addStringOption(option =>
+        option.setName('url')
+            .setDescription('The URL to attach to this thread')
+            .setRequired(true)),
+
     // SETUP COMMAND
     new SlashCommandBuilder()
         .setName('setup')
