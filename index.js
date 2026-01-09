@@ -179,7 +179,11 @@ function parseVars(text, interaction = null) {
     
     processed = processed.replace(/{br}/g, '\n');
     
-    return processed.length > 4000 ? processed.substring(0, 4000) + "..." : processed.replace(/{br}/g, '\n');
+    // Safety check for Discord limits (4096 is the limit for descriptions)
+    if (processed.length > 4000) {
+        return processed.substring(0, 4000) + "...";
+    }
+    return processed;
 }
 
 function getErrorPage(title, message, code = "403") {
@@ -1153,16 +1157,23 @@ app.get('/snippets', async (req, res) => {
     `);
 });
 
-app.get('/snippets/new', (req, res) => {
+app.get('/snippets/new', async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
 
-    const guilds = db.prepare(`SELECT guild_id, guild_name FROM guild_settings`).all()
-        .filter(g => {
-            const guild = client.guilds.cache.get(g.guild_id);
-            if (!guild) return false;
-            const member = guild.members.cache.get(req.user.id);
-            return member && (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, getSettings(g.guild_id)));
-        });
+    // FIX: Use an async loop to fetch members so the dropdown isn't empty
+    const allowedGuilds = [];
+    const allSettings = db.prepare(`SELECT guild_id, guild_name FROM guild_settings`).all();
+    
+    for (const s of allSettings) {
+        const guild = client.guilds.cache.get(s.guild_id);
+        if (!guild) continue;
+        try {
+            const member = await guild.members.fetch(req.user.id);
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || hasHelperRole(member, s)) {
+                allowedGuilds.push(s);
+            }
+        } catch (e) { /* User not in this guild */ }
+    }
 
     res.send(`
     <html>
@@ -1175,93 +1186,58 @@ app.get('/snippets/new', (req, res) => {
         <div class="max-w-7xl mx-auto">
             ${getNav('snippets', req.user)}
             
-            <div class="mb-8 flex justify-between items-end">
-                <div>
-                    <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Create <span class="text-[#FFAA00]">Snippet</span></h1>
-                    <p class="text-xs text-slate-500 uppercase font-bold tracking-widest mt-1">
-                        Supports <span class="markdown-hint" title="**Bold**, *Italics*, [Links](url), <@User>">Discord Markdown</span>
-                    </p>
-                </div>
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Create <span class="text-[#FFAA00]">Snippet</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest mt-1">Supports Discord Markdown</p>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
                 <form id="snippetForm" method="POST" action="/snippets/new" class="space-y-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Target Server</label>
-                            <select name="guild_id" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none">
+                            <label class="text-[9px] font-black text-slate-500 uppercase mb-2 block">Target Server</label>
+                            <select name="guild_id" required class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white outline-none">
                                 <option value="" disabled selected>Choose server...</option>
-                                ${guilds.map(g => `<option value="${g.guild_id}">${g.guild_name}</option>`).join('')}
+                                ${allowedGuilds.map(g => `<option value="${g.guild_id}">${g.guild_name}</option>`).join('')}
                             </select>
                         </div>
                         <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Trigger Name</label>
-                            <input name="name" required placeholder="e.g. welcome" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white focus:border-[#FFAA00] outline-none">
+                            <label class="text-[9px] font-black text-slate-500 uppercase mb-2 block">Trigger Name</label>
+                            <input name="name" required placeholder="e.g. welcome" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-bold text-white outline-none">
                         </div>
                     </div>
 
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="text-[9px] font-black text-slate-500 uppercase mb-1 block">Title</label>
-                                <input id="inTitle" name="title" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                            </div>
-                            <div>
-                                <label class="text-[9px] font-black text-slate-500 uppercase mb-1 block">Title Link (URL)</label>
-                                <input id="inUrl" name="url" placeholder="https://..." class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <div class="flex justify-between items-end mb-2">
-                                <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Description</label>
-                                <div class="flex gap-2">
-                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="Mentions the user who ran the command">{user}</span>
-                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="The name of the Discord Server">{server}</span>
-                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="The current channel">{channel}</span>
-                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="Inserts a line break">{br}</span>
-                                </div>
-                            </div>
-                            <textarea id="inDesc" name="description" placeholder="Hello {user}, welcome to {server}!" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32 focus:border-[#FFAA00] outline-none resize-none"></textarea>
-                            <p class="text-[9px] text-slate-500 mt-1 italic font-medium">✨ Supports Discord Markdown (**bold**, [links](url), etc)</p>
-                        </div>
+                        <input id="inTitle" name="title" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
+                        <input id="inUrl" name="url" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
+                        <textarea id="inDesc" name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32 outline-none resize-none"></textarea>
                     </div>
 
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="text-[9px] font-black text-slate-500 uppercase mb-1 block">Main Image URL</label>
-                                <input id="inImage" name="image_url" placeholder="https://.../banner.png" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                            </div>
-                            <div>
-                                <label class="text-[9px] font-black text-slate-500 uppercase mb-1 block">Thumbnail URL</label>
-                                <input id="inThumb" name="thumbnail_url" placeholder="https://.../icon.png" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                            </div>
-                        </div>
+                        <input id="inImage" name="image_url" placeholder="Main Image URL" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
+                        <input id="inThumb" name="thumbnail_url" placeholder="Thumbnail URL" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white outline-none">
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="md:col-span-2">
-                             <input id="inFooter" name="footer" placeholder="Footer text" class="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        </div>
+                        <input id="inFooter" name="footer" placeholder="Footer text" class="md:col-span-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-xs text-white outline-none">
                         <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-                            <input id="inColor" name="color" type="color" value="#FFAA00" class="bg-transparent border-none w-8 h-8 cursor-pointer">
+                            <input id="inColor" name="color" type="color" value="#FFAA00" class="w-8 h-8 cursor-pointer bg-transparent border-none">
                             <span class="text-[10px] font-mono text-slate-500" id="hexVal">#FFAA00</span>
                         </div>
                     </div>
 
-                    <button type="submit" class="w-full bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-[#FFC040] transition-all">
-                        Create Snippet
-                    </button>
-
+                    <!-- FIX: Integrated Buttons -->
                     <div class="flex gap-4">
+                        <button type="submit" class="flex-[2] bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-[#FFC040] transition-all">
+                            Create Snippet
+                        </button>
                         <a href="/snippets" class="flex-1 bg-slate-800 text-slate-400 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest text-center hover:bg-slate-700 transition-all border border-slate-700">
                             Cancel
                         </a>
                     </div>
-
                 </form>
 
+                <!-- LIVE PREVIEW SIDE -->
                 <div class="sticky top-6">
                     <div class="bg-[#313338] p-4 rounded-sm shadow-2xl font-['gg_sans',_sans-serif]">
                         <div class="flex items-start gap-4">
@@ -1270,17 +1246,14 @@ app.get('/snippets/new', (req, res) => {
                                 <div class="flex items-center gap-2 mb-1">
                                     <span class="font-medium text-white text-sm">${client.user.username}</span>
                                     <span class="bg-[#5865F2] text-white text-[10px] px-1.5 py-0.5 rounded-[3px] font-bold uppercase">App</span>
-                                    <span class="text-[#949ba4] text-[10px]">Today at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <span class="text-[#949ba4] text-[10px]">Today at 12:00 PM</span>
                                 </div>
                                 
                                 <div id="preBorder" class="bg-[#2b2d31] border-l-[4px] border-[#FFAA00] rounded-[4px] p-3 mt-1 max-w-[432px] relative">
                                     <img id="preThumb" src="" class="absolute top-3 right-3 w-20 h-20 rounded-md object-cover">
-                                    
                                     <div id="preTitle" class="text-white font-bold text-base mb-1"></div>
                                     <div id="preDesc" class="text-[#dbdee1] text-sm leading-[1.375rem] whitespace-pre-wrap"></div>
-                                    
                                     <img id="preImage" src="" class="mt-3 rounded-md w-full max-h-80 object-cover">
-                                    
                                     <div id="preFooter" class="text-[#b5bac1] text-[10px] mt-2 font-medium"></div>
                                 </div>
                             </div>
@@ -1311,40 +1284,32 @@ app.get('/snippets/new', (req, res) => {
                 thumb: document.getElementById('preThumb')
             };
 
-            // Simulated variable replacement for the dashboard preview
             function simulateVars(text) {
                 if (!text) return "";
-                let p = text
-                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") // Escape HTML
-                    .replace(/{user}/g, '<span class="text-[#5865F2] hover:underline cursor-pointer">@${req.user.username}</span>')
+                return text
+                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                    .replace(/{user}/g, '<span class="text-[#5865F2] hover:underline">@${req.user.username}</span>')
                     .replace(/{server}/g, '<strong>Impulse OS</strong>')
-                    .replace(/{channel}/g, '<span class="text-[#5865F2] hover:underline cursor-pointer">#general</span>')
                     .replace(/{br}/g, '<br>')
-                    // Discord Markdown Simulation
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
-                    .replace(/\*(.*?)\*/g, '<em>$1</em>') // Italics
-                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="#" class="text-[#00a8fc] hover:underline">$1</a>'); // Links
-
-                return p;
+                    .replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>')
+                    .replace(/\\*(.*?)\\*/g, '<em>$1</em>')
+                    .replace(/\`(.*?)\`/g, '<code class="bg-[#1e1f22] px-1 rounded">$1</code>')
+                    .replace(/\\[(.*?)\\]\\((.*?)\\)/g, '<a href="#" class="text-[#00a8fc]">$1</a>');
             }
 
             function updatePreview() {
-                // Handle Title and Title Link
                 const rawTitle = inputs.title.value;
                 if (inputs.url.value) {
-                    preview.title.innerHTML = \`<a href="#" class="text-[#00a8fc] hover:underline">\${simulateVars(rawTitle) || 'Untitled Link'}</a>\`;
+                    preview.title.innerHTML = '<a href="#" class="text-[#00a8fc] hover:underline">' + simulateVars(rawTitle) + '</a>';
                 } else {
                     preview.title.innerHTML = simulateVars(rawTitle);
                 }
 
-                // Use innerHTML for description so our simulated variable spans work
                 preview.desc.innerHTML = simulateVars(inputs.desc.value);
-                preview.footer.innerText = simulateVars(inputs.footer.value);
-                
+                preview.footer.innerText = inputs.footer.value;
                 preview.border.style.borderColor = inputs.color.value;
                 preview.hex.innerText = inputs.color.value.toUpperCase();
                 
-                // Handle Images
                 preview.image.src = inputs.image.value;
                 preview.image.style.display = inputs.image.value ? 'block' : 'none';
                 
