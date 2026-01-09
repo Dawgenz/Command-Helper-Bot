@@ -1393,7 +1393,7 @@ app.get("/invite", (req, res) => {
                 <h1 class="text-5xl md:text-7xl font-black tracking-tighter uppercase bg-gradient-to-r from-white to-[#FFAA00] bg-clip-text text-transparent">
                     Impulse<span class="text-[#FFAA00]">OS</span>
                 </h1>
-                <p class="text-base md:text-lg font-bold text-[#FFAA00] uppercase tracking-[0.4em] mt-4">Next-Gen Forum Automation</p>
+                <p class="text-base md:text-lg font-bold text-[#FFAA00] uppercase tracking-[0.4em] mt-4">Built for Gup's Command Central</p>
                 <p class="text-slate-400 max-w-2xl mx-auto mt-6 leading-relaxed text-sm md:text-base">Precision thread management • Reusable resource snippets • Secure link delivery • Full audit dashboard</p>
             </div>
 
