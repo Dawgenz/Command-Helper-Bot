@@ -1255,9 +1255,6 @@ app.get('/snippets/new', (req, res) => {
                     </button>
 
                     <div class="flex gap-4">
-                        <button type="submit" class="flex-1 bg-[#FFAA00] text-black py-4 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-[#FFC040] transition-all">
-                            Save Snippet
-                        </button>
                         <a href="/snippets" class="flex-1 bg-slate-800 text-slate-400 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest text-center hover:bg-slate-700 transition-all border border-slate-700">
                             Cancel
                         </a>
