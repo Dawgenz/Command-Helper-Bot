@@ -136,20 +136,21 @@ function getNav(activePage, user) {
   const current = activePage === "home" ? "overview" : activePage;
   const pages = ["overview", "snippets", "threads", "logs"];
 
-  const profileSection = user
-    ? `
-        <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 shadow-xl">
-            <div class="text-right hidden sm:block">
-                <p class="text-[10px] font-black text-white uppercase leading-none">${user.username}</p>
-                <a href="/logout" class="text-[8px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Terminate Session</a>
-            </div>
-            <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" class="w-8 h-8 rounded-full border-2 border-[#FFAA00]">
+  const profileSection = user ? `
+    <div class="flex items-center gap-3 sm:gap-4 bg-slate-900/80 px-3 sm:px-4 py-2 rounded-full border border-slate-700/80 shadow-lg hover:border-[#FFAA00]/40 transition-all">
+        <div class="text-right">
+            <p class="text-[11px] sm:text-xs font-black text-white uppercase leading-none">${user.username}</p>
+            <a href="/logout" class="text-[9px] sm:text-[10px] font-bold text-rose-400 hover:text-rose-300 transition-colors">
+                Logout
+            </a>
         </div>
-    `
-    : "";
+        <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" 
+             class="w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 border-[#FFAA00]/60 shadow-md">
+    </div>
+  ` : "";
 
   return `
-    <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
+    <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12 sticky top-0 z-50 bg-[#0b0f1a]/80 backdrop-blur-xl py-4 px-4 -mx-4 md:-mx-8 border-b border-slate-800/60">
         <div class="flex items-center gap-4">
             <img src="${client.user.displayAvatarURL()}" class="w-10 h-10 rounded-xl shadow-lg border border-[#FFAA00]/30">
             <div>
@@ -158,17 +159,17 @@ function getNav(activePage, user) {
             </div>
         </div>
 
-        <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-md">
+        <div class="flex items-center bg-slate-900/60 p-1.5 rounded-2xl border border-slate-700/60 backdrop-blur-md shadow-inner">
             ${pages
               .map(
                 (p) => `
                 <a href="/${p === "overview" ? "" : p}" 
-                   class="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                   class="px-5 sm:px-6 py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-300 ${
                      current === p
-                       ? "bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10"
-                       : "text-slate-500 hover:text-white"
+                       ? "bg-gradient-to-r from-[#FFAA00] to-amber-500 text-black shadow-lg shadow-amber-500/30"
+                       : "text-slate-400 hover:text-white hover:bg-slate-800/50"
                    }">
-                    ${p}
+                    ${p.charAt(0).toUpperCase() + p.slice(1)}
                 </a>
             `
               )
@@ -177,7 +178,7 @@ function getNav(activePage, user) {
 
         ${profileSection}
     </nav>
-    `;
+  `;
 }
 
 const logAction = (
@@ -336,15 +337,34 @@ const getHead = (title) => `
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=JetBrains+Mono&display=swap');
-            body { font-family: 'Space Grotesk', sans-serif; }
+            body { font-family: 'Space Grotesk', sans-serif; background: #0b0f1a; }
             .mono { font-family: 'JetBrains Mono', monospace; }
-            .glow-amber { box-shadow: 0 0 20px rgba(255, 170, 0, 0.15); }
-            .border-amber { border-color: rgba(255, 170, 0, 0.3); }
+            
+            .glass {
+                background: rgba(30, 41, 59, 0.45);
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border: 1px solid rgba(255, 170, 0, 0.12);
+                box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+            }
+            
+            .glow-hover:hover {
+                box-shadow: 0 0 25px rgba(255, 170, 0, 0.18);
+                border-color: rgba(255, 170, 0, 0.35);
+                transform: translateY(-2px);
+                transition: all 0.3s ease;
+            }
+            
             ::-webkit-scrollbar { width: 8px; }
-            ::-webkit-scrollbar-track { background: #0b0f1a; }
+            ::-webkit-scrollbar-track { background: #0f1622; }
             ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
             ::-webkit-scrollbar-thumb:hover { background: #FFAA00; }
-            .no-scrollbar::-webkit-scrollbar { display: none; }
+            
+            input:focus, textarea:focus, button:focus {
+                outline: none;
+                ring: 2px solid #FFAA00/40;
+                box-shadow: 0 0 0 3px rgba(255,170,0,0.15);
+            }
         </style>
     </head>
 `;
@@ -505,6 +525,21 @@ app.get("/", async (req, res) => {
         <div class="max-w-6xl mx-auto">
             ${getNav("overview", req.user)}
 
+            <!-- Welcome Card -->
+            <div class="text-center mb-12 glass rounded-2xl p-8 glow-hover">
+                <div class="flex flex-col md:flex-row items-center justify-center gap-6">
+                    <div class="relative">
+                        <div class="absolute inset-0 bg-[#FFAA00] blur-xl opacity-30 rounded-full animate-pulse"></div>
+                        <img src="https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png" 
+                            class="w-20 h-20 rounded-full border-4 border-[#FFAA00]/60 relative z-10 shadow-xl">
+                    </div>
+                    <div>
+                        <h2 class="text-3xl font-black text-white">Welcome back, ${req.user.username}</h2>
+                        <p class="text-slate-400 mt-2">Managing ${authorizedGuilds.length} server${authorizedGuilds.length !== 1 ? 's' : ''}</p>
+                    </div>
+                </div>
+            </div>
+
             <div class="mb-10">
                 <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
                     System <span class="text-[#FFAA00]">Overview</span>
@@ -547,6 +582,29 @@ app.get("/", async (req, res) => {
                     </div>
                     <p class="text-4xl font-black text-white">${totalSnippets}</p>
                     <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Saved templates</p>
+                </div>
+            </div>
+
+            <!-- Uptime & Global Stats Card -->
+            <div class="glass rounded-2xl p-8 mb-12 glow-hover">
+                <h3 class="text-xl font-black text-[#FFAA00] uppercase tracking-wider mb-6 text-center">System Status</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+                    <div>
+                        <p class="text-3xl font-black text-white">${Math.floor((Date.now() - client.readyTimestamp) / 86400000)}d ${Math.floor(((Date.now() - client.readyTimestamp) % 86400000) / 3600000)}h</p>
+                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Uptime</p>
+                    </div>
+                    <div>
+                        <p class="text-3xl font-black text-white">${db.prepare("SELECT COUNT(*) as count FROM guild_settings").get().count}</p>
+                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Configured Guilds</p>
+                    </div>
+                    <div>
+                        <p class="text-3xl font-black text-white">${db.prepare("SELECT COUNT(*) as count FROM thread_tracking").get().count}</p>
+                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Tracked Threads</p>
+                    </div>
+                    <div>
+                        <p class="text-3xl font-black text-white">${db.prepare("SELECT COUNT(*) as count FROM snippets").get().count}</p>
+                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Snippets</p>
+                    </div>
                 </div>
             </div>
 
