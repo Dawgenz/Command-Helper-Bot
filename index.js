@@ -136,21 +136,20 @@ function getNav(activePage, user) {
   const current = activePage === "home" ? "overview" : activePage;
   const pages = ["overview", "snippets", "threads", "logs"];
 
-  const profileSection = user ? `
-    <div class="flex items-center gap-3 sm:gap-4 bg-slate-900/80 px-3 sm:px-4 py-2 rounded-full border border-slate-700/80 shadow-lg hover:border-[#FFAA00]/40 transition-all">
-        <div class="text-right">
-            <p class="text-[11px] sm:text-xs font-black text-white uppercase leading-none">${user.username}</p>
-            <a href="/logout" class="text-[9px] sm:text-[10px] font-bold text-rose-400 hover:text-rose-300 transition-colors">
-                Logout
-            </a>
+  const profileSection = user
+    ? `
+        <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 shadow-xl">
+            <div class="text-right hidden sm:block">
+                <p class="text-[10px] font-black text-white uppercase leading-none">${user.username}</p>
+                <a href="/logout" class="text-[8px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Terminate Session</a>
+            </div>
+            <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" class="w-8 h-8 rounded-full border-2 border-[#FFAA00]">
         </div>
-        <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" 
-             class="w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 border-[#FFAA00]/60 shadow-md">
-    </div>
-  ` : "";
+    `
+    : "";
 
   return `
-    <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12 sticky top-0 z-50 bg-[#0b0f1a]/80 backdrop-blur-xl py-4 px-4 -mx-4 md:-mx-8 border-b border-slate-800/60">
+    <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
         <div class="flex items-center gap-4">
             <img src="${client.user.displayAvatarURL()}" class="w-10 h-10 rounded-xl shadow-lg border border-[#FFAA00]/30">
             <div>
@@ -159,64 +158,26 @@ function getNav(activePage, user) {
             </div>
         </div>
 
-        <div class="relative flex items-center bg-slate-900/60 p-1.5 rounded-2xl border border-slate-700/60 backdrop-blur-md shadow-inner">
+        <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-md">
             ${pages
               .map(
                 (p) => `
                 <a href="/${p === "overview" ? "" : p}" 
-                   class="tab-link px-5 sm:px-6 py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-300 relative z-10 ${
+                   class="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                      current === p
-                       ? "text-black"
-                       : "text-slate-400 hover:text-white"
-                   }"
-                   data-tab="${p}">
-                    ${p.charAt(0).toUpperCase() + p.slice(1)}
+                       ? "bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10"
+                       : "text-slate-500 hover:text-white"
+                   }">
+                    ${p}
                 </a>
             `
               )
               .join("")}
-
-            <!-- Sliding Indicator -->
-            <div id="tab-indicator" class="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-[#FFAA00] to-amber-500 rounded-full transition-all duration-500 ease-out"></div>
         </div>
 
         ${profileSection}
     </nav>
-
-    <!-- Tab Indicator JavaScript -->
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const tabs = document.querySelectorAll('.tab-link');
-            const indicator = document.getElementById('tab-indicator');
-            
-            function moveIndicator(tab) {
-                const rect = tab.getBoundingClientRect();
-                const navRect = tab.parentElement.getBoundingClientRect();
-                
-                indicator.style.width = \`\${rect.width}px\`;
-                indicator.style.transform = \`translateX(\${rect.left - navRect.left}px)\`;
-            }
-
-            // Initial position
-            const activeTab = document.querySelector('.tab-link[data-tab="${current}"]') || tabs[0];
-            if (activeTab) moveIndicator(activeTab);
-
-            // Move on click (smooth even when navigating)
-            tabs.forEach(tab => {
-                tab.addEventListener('click', (e) => {
-                    // We still allow normal navigation, but indicator moves instantly for smoothness
-                    moveIndicator(tab);
-                });
-            });
-
-            // Update on resize (mobile orientation change etc.)
-            window.addEventListener('resize', () => {
-                const active = document.querySelector('.tab-link[data-tab="${current}"]');
-                if (active) moveIndicator(active);
-            });
-        });
-    </script>
-  `;
+    `;
 }
 
 const logAction = (
@@ -375,34 +336,15 @@ const getHead = (title) => `
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=JetBrains+Mono&display=swap');
-            body { font-family: 'Space Grotesk', sans-serif; background: #0b0f1a; }
+            body { font-family: 'Space Grotesk', sans-serif; }
             .mono { font-family: 'JetBrains Mono', monospace; }
-            
-            .glass {
-                background: rgba(30, 41, 59, 0.45);
-                backdrop-filter: blur(16px);
-                -webkit-backdrop-filter: blur(16px);
-                border: 1px solid rgba(255, 170, 0, 0.12);
-                box-shadow: 0 8px 32px rgba(0,0,0,0.35);
-            }
-            
-            .glow-hover:hover {
-                box-shadow: 0 0 25px rgba(255, 170, 0, 0.18);
-                border-color: rgba(255, 170, 0, 0.35);
-                transform: translateY(-2px);
-                transition: all 0.3s ease;
-            }
-            
+            .glow-amber { box-shadow: 0 0 20px rgba(255, 170, 0, 0.15); }
+            .border-amber { border-color: rgba(255, 170, 0, 0.3); }
             ::-webkit-scrollbar { width: 8px; }
-            ::-webkit-scrollbar-track { background: #0f1622; }
+            ::-webkit-scrollbar-track { background: #0b0f1a; }
             ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
             ::-webkit-scrollbar-thumb:hover { background: #FFAA00; }
-            
-            input:focus, textarea:focus, button:focus {
-                outline: none;
-                ring: 2px solid #FFAA00/40;
-                box-shadow: 0 0 0 3px rgba(255,170,0,0.15);
-            }
+            .no-scrollbar::-webkit-scrollbar { display: none; }
         </style>
     </head>
 `;
