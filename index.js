@@ -159,12 +159,12 @@ function getNav(activePage, user) {
             </div>
         </div>
 
-        <div class="relative flex items-center bg-slate-900/60 p-1.5 rounded-2xl border border-slate-700/60 backdrop-blur-md shadow-inner overflow-hidden">
+        <div class="relative flex items-center bg-slate-900/60 p-1.5 rounded-2xl border border-slate-700/60 backdrop-blur-md shadow-inner">
             ${pages
               .map(
                 (p) => `
                 <a href="/${p === "overview" ? "" : p}" 
-                   class="tab-link relative px-5 sm:px-6 py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-colors duration-200 z-10 ${
+                   class="tab-link px-5 sm:px-6 py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-300 relative z-10 ${
                      current === p
                        ? "text-black"
                        : "text-slate-400 hover:text-white"
@@ -176,41 +176,43 @@ function getNav(activePage, user) {
               )
               .join("")}
 
-            <!-- Sliding orange background -->
-            <div id="tab-slider" class="absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-[#FFAA00] to-amber-500 rounded-xl transition-all duration-500 ease-out"></div>
+            <!-- Sliding Indicator -->
+            <div id="tab-indicator" class="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-[#FFAA00] to-amber-500 rounded-full transition-all duration-500 ease-out"></div>
         </div>
 
         ${profileSection}
     </nav>
 
+    <!-- Tab Indicator JavaScript -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const tabs = document.querySelectorAll('.tab-link');
-            const slider = document.getElementById('tab-slider');
+            const indicator = document.getElementById('tab-indicator');
             
-            function updateSlider(tab) {
+            function moveIndicator(tab) {
                 const rect = tab.getBoundingClientRect();
-                const container = tab.parentElement.getBoundingClientRect();
+                const navRect = tab.parentElement.getBoundingClientRect();
                 
-                slider.style.width = \`\${rect.width}px\`;
-                slider.style.transform = \`translateX(\${rect.left - container.left}px)\`;
+                indicator.style.width = \`\${rect.width}px\`;
+                indicator.style.transform = \`translateX(\${rect.left - navRect.left}px)\`;
             }
 
-            // Set initial position
+            // Initial position
             const activeTab = document.querySelector('.tab-link[data-tab="${current}"]') || tabs[0];
-            if (activeTab) updateSlider(activeTab);
+            if (activeTab) moveIndicator(activeTab);
 
-            // Update on click (runs before navigation)
+            // Move on click (smooth even when navigating)
             tabs.forEach(tab => {
-                tab.addEventListener('click', () => {
-                    updateSlider(tab);
+                tab.addEventListener('click', (e) => {
+                    // We still allow normal navigation, but indicator moves instantly for smoothness
+                    moveIndicator(tab);
                 });
             });
 
-            // Handle resize
+            // Update on resize (mobile orientation change etc.)
             window.addEventListener('resize', () => {
-                const currentActive = document.querySelector('.tab-link[data-tab="${current}"]');
-                if (currentActive) updateSlider(currentActive);
+                const active = document.querySelector('.tab-link[data-tab="${current}"]');
+                if (active) moveIndicator(active);
             });
         });
     </script>
