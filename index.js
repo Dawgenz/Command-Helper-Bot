@@ -159,25 +159,63 @@ function getNav(activePage, user) {
             </div>
         </div>
 
-        <div class="flex items-center bg-slate-900/60 p-1.5 rounded-2xl border border-slate-700/60 backdrop-blur-md shadow-inner">
+        <div class="relative flex items-center bg-slate-900/60 p-1.5 rounded-2xl border border-slate-700/60 backdrop-blur-md shadow-inner">
             ${pages
               .map(
                 (p) => `
                 <a href="/${p === "overview" ? "" : p}" 
-                   class="px-5 sm:px-6 py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-300 ${
+                   class="tab-link px-5 sm:px-6 py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all duration-300 relative z-10 ${
                      current === p
-                       ? "bg-gradient-to-r from-[#FFAA00] to-amber-500 text-black shadow-lg shadow-amber-500/30"
-                       : "text-slate-400 hover:text-white hover:bg-slate-800/50"
-                   }">
+                       ? "text-black"
+                       : "text-slate-400 hover:text-white"
+                   }"
+                   data-tab="${p}">
                     ${p.charAt(0).toUpperCase() + p.slice(1)}
                 </a>
             `
               )
               .join("")}
+
+            <!-- Sliding Indicator -->
+            <div id="tab-indicator" class="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-[#FFAA00] to-amber-500 rounded-full transition-all duration-500 ease-out"></div>
         </div>
 
         ${profileSection}
     </nav>
+
+    <!-- Tab Indicator JavaScript -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const tabs = document.querySelectorAll('.tab-link');
+            const indicator = document.getElementById('tab-indicator');
+            
+            function moveIndicator(tab) {
+                const rect = tab.getBoundingClientRect();
+                const navRect = tab.parentElement.getBoundingClientRect();
+                
+                indicator.style.width = \`\${rect.width}px\`;
+                indicator.style.transform = \`translateX(\${rect.left - navRect.left}px)\`;
+            }
+
+            // Initial position
+            const activeTab = document.querySelector('.tab-link[data-tab="${current}"]') || tabs[0];
+            if (activeTab) moveIndicator(activeTab);
+
+            // Move on click (smooth even when navigating)
+            tabs.forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    // We still allow normal navigation, but indicator moves instantly for smoothness
+                    moveIndicator(tab);
+                });
+            });
+
+            // Update on resize (mobile orientation change etc.)
+            window.addEventListener('resize', () => {
+                const active = document.querySelector('.tab-link[data-tab="${current}"]');
+                if (active) moveIndicator(active);
+            });
+        });
+    </script>
   `;
 }
 
@@ -525,21 +563,6 @@ app.get("/", async (req, res) => {
         <div class="max-w-6xl mx-auto">
             ${getNav("overview", req.user)}
 
-            <!-- Welcome Card -->
-            <div class="text-center mb-12 glass rounded-2xl p-8 glow-hover">
-                <div class="flex flex-col md:flex-row items-center justify-center gap-6">
-                    <div class="relative">
-                        <div class="absolute inset-0 bg-[#FFAA00] blur-xl opacity-30 rounded-full animate-pulse"></div>
-                        <img src="https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png" 
-                            class="w-20 h-20 rounded-full border-4 border-[#FFAA00]/60 relative z-10 shadow-xl">
-                    </div>
-                    <div>
-                        <h2 class="text-3xl font-black text-white">Welcome back, ${req.user.username}</h2>
-                        <p class="text-slate-400 mt-2">Managing ${authorizedGuilds.length} server${authorizedGuilds.length !== 1 ? 's' : ''}</p>
-                    </div>
-                </div>
-            </div>
-
             <div class="mb-10">
                 <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
                     System <span class="text-[#FFAA00]">Overview</span>
@@ -582,29 +605,6 @@ app.get("/", async (req, res) => {
                     </div>
                     <p class="text-4xl font-black text-white">${totalSnippets}</p>
                     <p class="text-[10px] text-slate-600 uppercase font-bold tracking-wider mt-1">Saved templates</p>
-                </div>
-            </div>
-
-            <!-- Uptime & Global Stats Card -->
-            <div class="glass rounded-2xl p-8 mb-12 glow-hover">
-                <h3 class="text-xl font-black text-[#FFAA00] uppercase tracking-wider mb-6 text-center">System Status</h3>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-                    <div>
-                        <p class="text-3xl font-black text-white">${Math.floor((Date.now() - client.readyTimestamp) / 86400000)}d ${Math.floor(((Date.now() - client.readyTimestamp) % 86400000) / 3600000)}h</p>
-                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Uptime</p>
-                    </div>
-                    <div>
-                        <p class="text-3xl font-black text-white">${db.prepare("SELECT COUNT(*) as count FROM guild_settings").get().count}</p>
-                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Configured Guilds</p>
-                    </div>
-                    <div>
-                        <p class="text-3xl font-black text-white">${db.prepare("SELECT COUNT(*) as count FROM thread_tracking").get().count}</p>
-                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Tracked Threads</p>
-                    </div>
-                    <div>
-                        <p class="text-3xl font-black text-white">${db.prepare("SELECT COUNT(*) as count FROM snippets").get().count}</p>
-                        <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Snippets</p>
-                    </div>
                 </div>
             </div>
 
