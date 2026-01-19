@@ -26,6 +26,15 @@ const commands = [
                 .setDescription('Link to the original post')
                 .setRequired(true)),
 
+    // LColor COMMAND
+    new SlashCommandBuilder()
+        .setName('lcolor')
+        .setDescription('Set a reaction trigger for a user')
+        .addUserOption(option => option.setName('user').setDescription('The user to target').setRequired(true))
+        .addIntegerOption(option => option.setName('count').setDescription('Number of reactions required').setRequired(true))
+        .addStringOption(option => option.setName('reaction').setDescription('The emoji name or ID').setRequired(true))
+        .addStringOption(option => option.setName('text').setDescription('Custom reply text (defaults to "L color")').setRequired(false)),
+
     // SNIPPET COMMAND
     new SlashCommandBuilder()
         .setName('snippet')

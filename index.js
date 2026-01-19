@@ -96,6 +96,30 @@ db.prepare(
 )`
 ).run();
 
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS reaction_triggers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT,
+        target_user_id TEXT,
+        reaction_id TEXT,
+        trigger_count INTEGER,
+        response_text TEXT DEFAULT 'L color',
+        enabled INTEGER DEFAULT 1
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS triggered_messages (
+        message_id TEXT,
+        trigger_id INTEGER,
+        PRIMARY KEY (message_id, trigger_id)
+    )
+`).run();
+
+try {
+    db.prepare(`ALTER TABLE guild_settings ADD COLUMN fun_features_enabled INTEGER DEFAULT 1`).run();
+} catch (e) { /* Column already exists */ }
+
 try {
   db.prepare(`ALTER TABLE snippets ADD COLUMN url TEXT`).run();
   db.prepare(`ALTER TABLE snippets ADD COLUMN image_url TEXT`).run();
@@ -134,7 +158,7 @@ const getSettings = (guildId) =>
 
 function getNav(activePage, user) {
   const current = activePage === "home" ? "overview" : activePage;
-  const pages = ["overview", "snippets", "threads", "logs"];
+  const pages = ["overview", "snippets", "threads", "fun", "logs"];
 
   const profileSection = user
     ? `
@@ -2188,6 +2212,62 @@ app.get("/snippets/toggle/:id", (req, res) => {
   res.redirect("/snippets");
 });
 
+app.get("/fun", async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+    
+    const managedGuilds = getManagedGuilds(req.user.id);
+    if (managedGuilds.length === 0) return res.send(getErrorPage("No Access", "Admin/Helper role required."));
+
+    const selectedGuildId = req.query.guild || managedGuilds[0];
+    const settings = getSettings(selectedGuildId);
+    const triggers = db.prepare("SELECT * FROM reaction_triggers WHERE guild_id = ?").all(selectedGuildId);
+
+    res.send(`
+        <html>
+        ${getHead("Impulse | Fun Features")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6">
+            <div class="max-w-6xl mx-auto">
+                ${getNav("fun", req.user)}
+                
+                <div class="flex items-center justify-between mb-8">
+                    <div>
+                        <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Fun <span class="text-[#FFAA00]">Features</span></h1>
+                        <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Interactive Triggers & Social Automation</p>
+                    </div>
+                    
+                    <div class="flex items-center gap-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
+                        <span class="text-[10px] font-black uppercase tracking-widest ${settings.fun_features_enabled ? 'text-emerald-400' : 'text-rose-500'}">
+                            ${settings.fun_features_enabled ? '● System Active' : '○ System Offline'}
+                        </span>
+                        <div class="w-12 h-6 bg-slate-800 rounded-full relative cursor-pointer border border-slate-700">
+                            <div class="absolute top-1 ${settings.fun_features_enabled ? 'right-1 bg-emerald-500' : 'left-1 bg-slate-600'} w-4 h-4 rounded-full transition-all"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid gap-4">
+                    ${triggers.map(t => `
+                        <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                            <div class="flex items-center gap-4">
+                                <div class="w-10 h-10 bg-[#FFAA00]/10 rounded-lg flex items-center justify-center text-[#FFAA00] font-bold">
+                                    ${t.reaction_id}
+                                </div>
+                                <div>
+                                    <p class="text-white font-bold text-sm">Target User: <span class="mono text-[#FFAA00]">${t.target_user_id}</span></p>
+                                    <p class="text-[10px] text-slate-500 uppercase font-bold">Reply: "${t.response_text}" • Threshold: ${t.trigger_count}</p>
+                                </div>
+                            </div>
+                            <button class="text-rose-500 hover:text-rose-400 text-[10px] font-black uppercase tracking-widest">Delete</button>
+                        </div>
+                    `).join('')}
+                    ${triggers.length === 0 ? '<p class="text-center text-slate-600 py-12 italic">No active triggers. Use /lcolor in Discord to create one.</p>' : ''}
+                </div>
+            </div>
+        </body>
+        </html>
+    `);
+});
+
 app.use((req, res) => {
   res
     .status(404)
@@ -2534,6 +2614,7 @@ client.on("messageCreate", async (message) => {
   }
 });
 
+// Thread Chain add Link reaction handler
 client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot) return;
 
@@ -2596,6 +2677,38 @@ client.on("messageReactionAdd", async (reaction, user) => {
     );
     setTimeout(() => msg.delete().catch(() => {}), 10000);
   }
+});
+
+// Reaction Trigger handler LColor
+client.on('messageReactionAdd', async (reaction, user) => {
+    if (reaction.partial) await reaction.fetch().catch(() => null);
+    
+    const { message, emoji } = reaction;
+    if (!message.guildId) return;
+
+    const settings = getSettings(message.guildId);
+    if (!settings?.fun_features_enabled) return;
+
+    const emojiId = emoji.id || emoji.name; // Works for custom and standard emojis
+    const authorId = message.author.id;
+
+    const triggers = db.prepare(`
+        SELECT * FROM reaction_triggers 
+        WHERE guild_id = ? AND target_user_id = ? AND reaction_id = ? AND enabled = 1
+    `).all(message.guildId, authorId, emojiId);
+
+    for (const trigger of triggers) {
+        if (reaction.count >= trigger.trigger_count) {
+            // Check if we've already replied to THIS message for THIS trigger
+            const alreadyTriggered = db.prepare(`SELECT 1 FROM triggered_messages WHERE message_id = ? AND trigger_id = ?`)
+                .get(message.id, trigger.id);
+
+            if (!alreadyTriggered) {
+                db.prepare(`INSERT INTO triggered_messages (message_id, trigger_id) VALUES (?, ?)`).run(message.id, trigger.id);
+                await message.reply(trigger.response_text);
+            }
+        }
+    }
 });
 
 client.on("interactionCreate", async (interaction) => {
@@ -3128,6 +3241,19 @@ client.on("interactionCreate", async (interaction) => {
       ],
     });
   }
+
+  if (interaction.commandName === 'lcolor') {
+    const targetUser = interaction.options.getUser('user');
+    const count = interaction.options.getInteger('count');
+    const reaction = interaction.options.getString('reaction');
+    const text = interaction.options.getString('text') || 'L color';
+
+    db.prepare(`INSERT INTO reaction_triggers (guild_id, target_user_id, reaction_id, trigger_count, response_text) VALUES (?, ?, ?, ?, ?)`).run(
+        interaction.guildId, targetUser.id, reaction, count, text
+    );
+
+    return interaction.reply({ content: `✅ Trigger set for **${targetUser.username}**!`, ephemeral: true });
+}
 });
 
 app.use((req, res) => {
