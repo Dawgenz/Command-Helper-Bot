@@ -356,7 +356,7 @@ const getHead = (title) => `
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"> 
         <title>${title}</title>
-        <link rel="icon" type="image/png" href="${client.user.displayAvatarURL()}">
+        <link rel="icon" type="image/png" href="${client.user?.displayAvatarURL() || 'https://cdn.discordapp.com/embed/avatars/0.png'}">
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=JetBrains+Mono&display=swap');
