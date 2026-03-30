@@ -2259,7 +2259,9 @@ app.get("/fun", async (req, res) => {
                                     <p class="text-[10px] text-slate-500 uppercase font-bold">Reply: "${t.response_text}" • Threshold: ${t.trigger_count}</p>
                                 </div>
                             </div>
-                            <button class="text-rose-500 hover:text-rose-400 text-[10px] font-black uppercase tracking-widest">Delete</button>
+                            <a href="/fun/delete/${t.id}?guild=${selectedGuildId}" 
+                               onclick="return confirm('Delete this trigger?')"
+                               class="text-rose-500 hover:text-rose-400 text-[10px] font-black uppercase tracking-widest">Delete</a>
                         </div>
                     `).join('')}
                     ${triggers.length === 0 ? '<p class="text-center text-slate-600 py-12 italic">No active triggers. Use /lcolor in Discord to create one.</p>' : ''}
@@ -2280,6 +2282,24 @@ app.use((req, res) => {
         "404"
       )
     );
+});
+
+app.get("/fun/delete/:id", async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+
+    const trigger = db.prepare("SELECT * FROM reaction_triggers WHERE id = ?").get(req.params.id);
+    if (!trigger) return res.redirect("/fun");
+
+    const managedGuilds = getManagedGuilds(req.user.id);
+    if (!managedGuilds.includes(trigger.guild_id)) {
+        return res.status(403).send(getErrorPage("Access Denied", "You don't have permission to delete this trigger."));
+    }
+
+    db.prepare("DELETE FROM reaction_triggers WHERE id = ?").run(req.params.id);
+    db.prepare("DELETE FROM triggered_messages WHERE trigger_id = ?").run(req.params.id);
+
+    const redirectGuild = req.query.guild || trigger.guild_id;
+    res.redirect(`/fun?guild=${redirectGuild}`);
 });
 
 app.listen(3000, "0.0.0.0");
@@ -3244,18 +3264,18 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  if (interaction.commandName === 'lcolor') {
-    const targetUser = interaction.options.getUser('user');
-    const count = interaction.options.getInteger('count');
-    const reaction = interaction.options.getString('reaction');
-    const text = interaction.options.getString('text') || 'L color';
+  if (interaction.commandName === 'reactmessage') {
+      const targetUser = interaction.options.getUser('user');
+      const count = interaction.options.getInteger('count');
+      const reaction = interaction.options.getString('reaction');
+      const text = interaction.options.getString('message');
 
-    db.prepare(`INSERT INTO reaction_triggers (guild_id, target_user_id, reaction_id, trigger_count, response_text) VALUES (?, ?, ?, ?, ?)`).run(
-        interaction.guildId, targetUser.id, reaction, count, text
-    );
+      db.prepare(`INSERT INTO reaction_triggers (guild_id, target_user_id, reaction_id, trigger_count, response_text) VALUES (?, ?, ?, ?, ?)`).run(
+          interaction.guildId, targetUser.id, reaction, count, text
+      );
 
-    return interaction.reply({ content: `✅ Trigger set for **${targetUser.username}**!`, ephemeral: true });
-}
+      return interaction.reply({ content: `✅ Trigger set! When **${targetUser.username}**'s message gets ${count}x ${reaction}, I'll reply: "${text}"`, ephemeral: true });
+  }
 });
 
 client.login(process.env.DISCORD_TOKEN);

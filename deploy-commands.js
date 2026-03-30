@@ -26,14 +26,14 @@ const commands = [
                 .setDescription('Link to the original post')
                 .setRequired(true)),
 
-    // LColor COMMAND
+    // REACTMESSAGE COMMAND
     new SlashCommandBuilder()
-        .setName('lcolor')
-        .setDescription('Set a reaction trigger for a user')
+        .setName('reactmessage')
+        .setDescription('Set a reaction trigger that auto-replies on a user\'s message')
         .addUserOption(option => option.setName('user').setDescription('The user to target').setRequired(true))
-        .addIntegerOption(option => option.setName('count').setDescription('Number of reactions required').setRequired(true))
-        .addStringOption(option => option.setName('reaction').setDescription('The emoji name or ID').setRequired(true))
-        .addStringOption(option => option.setName('text').setDescription('Custom reply text (defaults to "L color")').setRequired(false)),
+        .addIntegerOption(option => option.setName('count').setDescription('Number of reactions required to trigger').setRequired(true))
+        .addStringOption(option => option.setName('reaction').setDescription('The emoji to watch for (name or ID)').setRequired(true))
+        .addStringOption(option => option.setName('message').setDescription('What the bot will reply with').setRequired(true)),
 
     // SNIPPET COMMAND
     new SlashCommandBuilder()
