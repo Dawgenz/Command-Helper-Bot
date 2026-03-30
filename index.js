@@ -509,6 +509,7 @@ const getActionColor = (action) => {
     USER_BANNED: "bg-red-900/20 text-red-300 border-red-900/30",
     USER_UNBANNED: "bg-teal-600/10 text-teal-300 border-teal-600/20",
     AUTO_SUSPEND: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+    BULK_CLOSE: "bg-slate-500/10 text-slate-300 border-slate-500/20",
   };
   return colors[action] || "bg-slate-800 text-slate-400 border-slate-700";
 };
@@ -991,6 +992,7 @@ app.get("/logs", async (req, res) => {
     "USER_BANNED",
     "USER_UNBANNED",
     "AUTO_SUSPEND",
+    "BULK_CLOSE",
   ];
 
   const managedGuilds = managedGuildIds.map((id) => {
@@ -2608,147 +2610,103 @@ client.once("clientReady", async (c) => {
   await checkStaleThreads();
 });
 
+// Sends messages in chunks to avoid Discord rate limits
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function processInChunks(items, handler, chunkSize = 5, delayMs = 1500) {
+    let processed = 0, failed = 0;
+    for (let i = 0; i < items.length; i += chunkSize) {
+        const chunk = items.slice(i, i + chunkSize);
+        await Promise.allSettled(chunk.map(async item => {
+            try { await handler(item); processed++; }
+            catch (e) { console.error('Chunk handler error:', e.message); failed++; }
+        }));
+        if (i + chunkSize < items.length) await sleep(delayMs);
+    }
+    return { processed, failed };
+}
+
 async function checkStaleThreads() {
-  console.log("🔍 Checking for stale threads...");
+    console.log("🔍 Checking for stale threads...");
 
-  // 24 days = send warning (giving 6 hours to respond)
-  const warningThreshold = Date.now() - 24 * 24 * 60 * 60 * 1000;
-  // 30 days = auto-close
-  const closeThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const warningThreshold = Date.now() - 24 * 24 * 60 * 60 * 1000;
+    const closeThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
-  // Get threads that need warnings (24+ days old, no warning sent yet)
-  const threadsNeedingWarning = db
-    .prepare(
-      `
+    const threadsNeedingWarning = db.prepare(`
         SELECT * FROM thread_tracking 
         WHERE created_at <= ? 
         AND stale_warning_sent = 0
         AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
-    `
-    )
-    .all(warningThreshold, warningThreshold);
+    `).all(warningThreshold, warningThreshold);
 
-  for (const tracked of threadsNeedingWarning) {
-    const settings = getSettings(tracked.guild_id);
-    if (!settings) continue;
+    console.log(`⚠️  ${threadsNeedingWarning.length} threads need stale warnings`);
 
-    try {
-      const thread = await client.channels
-        .fetch(tracked.thread_id)
-        .catch(() => null);
-      if (!thread || thread.locked || thread.archived) continue;
+    await processInChunks(threadsNeedingWarning, async (tracked) => {
+        const settings = getSettings(tracked.guild_id);
+        if (!settings) return;
 
-      // Skip if thread already has resolved tag
-      if (thread.appliedTags.includes(settings.resolved_tag)) {
-        db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(
-          tracked.thread_id
-        );
-        continue;
-      }
+        const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
+        if (!thread || thread.locked || thread.archived) return;
+        if (thread.appliedTags.includes(settings.resolved_tag)) {
+            db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
+            return;
+        }
 
-      // Send warning to thread owner
-      const warningEmbed = new EmbedBuilder()
-        .setTitle("⚠️ Thread Inactivity Warning")
-        .setDescription(
-          `Hey <@${thread.ownerId}>! This thread has been inactive for **24 days** and will be automatically closed in **6 hours** due to inactivity.\n\n` +
-            `**To keep this thread open:**\n` +
-            `• Reply to this thread, OR\n` +
-            `• Use the \`/cancel\` command to renew it\n\n` +
-            `If you no longer need help, you can safely ignore this message.`
-        )
-        .setColor(0xf59e0b)
-        .setTimestamp()
-        .setFooter({ text: "Impulse Bot • Stale Thread Warning" });
+        const warningEmbed = new EmbedBuilder()
+            .setTitle("⚠️ Thread Inactivity Warning")
+            .setDescription(
+                `Hey <@${thread.ownerId}>! This thread has been inactive for **24 days** and will be automatically closed in **6 hours**.\n\n` +
+                `**To keep this thread open:**\n• Reply to this thread, OR\n• Use \`/cancel\` to renew it\n\n` +
+                `If you no longer need help, you can safely ignore this.`
+            )
+            .setColor(0xf59e0b)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot • Stale Thread Warning" });
 
-      await thread.send({
-        content: `<@${thread.ownerId}>`,
-        embeds: [warningEmbed],
-      });
+        await thread.send({ content: `<@${thread.ownerId}>`, embeds: [warningEmbed] });
+        db.prepare("UPDATE thread_tracking SET stale_warning_sent = 1 WHERE thread_id = ?").run(tracked.thread_id);
+        logAction(tracked.guild_id, "STALE_WARNING", `Sent stale warning for: ${thread.name}`);
+        console.log(`⚠️  Warned: ${thread.name}`);
+    }, 5, 1500);
 
-      // Mark warning as sent
-      db.prepare(
-        "UPDATE thread_tracking SET stale_warning_sent = 1 WHERE thread_id = ?"
-      ).run(tracked.thread_id);
-      logAction(
-        tracked.guild_id,
-        "STALE_WARNING",
-        `Sent stale warning for: ${thread.name}`
-      );
-
-      console.log(`⚠️  Sent stale warning for thread: ${thread.name}`);
-    } catch (error) {
-      console.error(
-        `Error sending stale warning for thread ${tracked.thread_id}:`,
-        error
-      );
-    }
-  }
-
-  // Get threads that should be closed (30+ days old with warning sent)
-  const threadsToClose = db
-    .prepare(
-      `
+    const threadsToClose = db.prepare(`
         SELECT * FROM thread_tracking 
         WHERE created_at <= ?
         AND stale_warning_sent = 1
         AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
-    `
-    )
-    .all(closeThreshold, closeThreshold);
+    `).all(closeThreshold, closeThreshold);
 
-  for (const tracked of threadsToClose) {
-    const settings = getSettings(tracked.guild_id);
-    if (!settings) continue;
+    console.log(`🔒 ${threadsToClose.length} threads queued for auto-close`);
 
-    try {
-      const thread = await client.channels
-        .fetch(tracked.thread_id)
-        .catch(() => null);
-      if (!thread || thread.locked || thread.archived) {
-        db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(
-          tracked.thread_id
-        );
-        continue;
-      }
+    await processInChunks(threadsToClose, async (tracked) => {
+        const settings = getSettings(tracked.guild_id);
+        if (!settings) return;
 
-      // Skip if thread already has resolved tag
-      if (thread.appliedTags.includes(settings.resolved_tag)) {
-        db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(
-          tracked.thread_id
-        );
-        continue;
-      }
+        const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
+        if (!thread || thread.locked || thread.archived) {
+            db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
+            return;
+        }
+        if (thread.appliedTags.includes(settings.resolved_tag)) {
+            db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
+            return;
+        }
 
-      await thread.setLocked(true);
+        await thread.setLocked(true);
+        const autoCloseEmbed = new EmbedBuilder()
+            .setTitle("🔒 Thread Auto-Closed")
+            .setDescription("This thread has been automatically closed due to 30+ days of inactivity. If you still need help, please create a new thread.")
+            .setColor(0x6b7280)
+            .setTimestamp()
+            .setFooter({ text: "Impulse Bot • Auto-Close" });
 
-      const autoCloseEmbed = new EmbedBuilder()
-        .setTitle("🔒 Thread Auto-Closed")
-        .setDescription(
-          "This thread has been automatically closed due to 30+ days of inactivity. If you still need help, please create a new thread."
-        )
-        .setColor(0x6b7280)
-        .setTimestamp()
-        .setFooter({ text: "Impulse Bot • Auto-Close" });
+        await thread.send({ embeds: [autoCloseEmbed] });
+        logAction(tracked.guild_id, "AUTO_CLOSE", `Auto-closed stale thread: ${thread.name}`);
+        db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
+        console.log(`🔒 Closed: ${thread.name}`);
+    }, 3, 2000);
 
-      await thread.send({ embeds: [autoCloseEmbed] });
-      logAction(
-        tracked.guild_id,
-        "AUTO_CLOSE",
-        `Auto-closed stale thread: ${thread.name}`
-      );
-
-      // Remove from tracking
-      db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(
-        tracked.thread_id
-      );
-
-      console.log(`🔒 Auto-closed stale thread: ${thread.name}`);
-    } catch (error) {
-      console.error(`Error auto-closing thread ${tracked.thread_id}:`, error);
-    }
-  }
-
-  console.log("✅ Stale thread check complete!");
+    console.log("✅ Stale thread check complete!");
 }
 
 client.on("threadCreate", async (thread) => {
@@ -3557,6 +3515,147 @@ client.on("interactionCreate", async (interaction) => {
     db.prepare("DELETE FROM banned_users WHERE user_id = ?").run(target.id);
     logAction(interaction.guildId, "USER_UNBANNED", `${target.username} globally unbanned`, userId, userName, userAvatar, `/unbanuser`, null, null);
     return interaction.reply({ embeds: [new EmbedBuilder().setTitle('✅ User Unbanned').setDescription(`**${target.username}** can now use this bot again.`).setColor(0x10b981).setTimestamp()], ephemeral: true });
+  }
+
+  if (interaction.commandName === 'closethreads') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: '❌ Administrator only.', ephemeral: true });
+    }
+    if (!settings) {
+        return interaction.reply({ content: '❌ Run `/setup` first.', ephemeral: true });
+    }
+
+    const days = interaction.options.getInteger('days');
+    const sendWarn = interaction.options.getBoolean('warn') ?? false;
+    const dryRun = interaction.options.getBoolean('dry_run') ?? false;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+        const forumChannel = await client.channels.fetch(settings.forum_id).catch(() => null);
+        if (!forumChannel) {
+            return interaction.editReply('❌ Could not fetch the configured forum channel.');
+        }
+
+        // Fetch all active threads from Discord directly
+        const fetchedThreads = await forumChannel.threads.fetchActive();
+        const candidates = [];
+
+        for (const [, thread] of fetchedThreads.threads) {
+            if (!thread.createdTimestamp || thread.createdTimestamp > cutoff) continue;
+            if (thread.locked || thread.archived) continue;
+            if (thread.appliedTags.includes(settings.resolved_tag)) continue;
+            candidates.push(thread);
+        }
+
+        if (dryRun) {
+            const embed = new EmbedBuilder()
+                .setTitle('🔍 Dry Run — Bulk Close Preview')
+                .setDescription(
+                    `**${candidates.length}** threads would be closed.\n\n` +
+                    `**Parameters:**\n` +
+                    `• Older than: **${days} days**\n` +
+                    `• Send warning message: **${sendWarn ? 'Yes' : 'No'}**\n\n` +
+                    `Run the command again without \`dry_run\` to execute.`
+                )
+                .setColor(0x3b82f6)
+                .setTimestamp()
+                .setFooter({ text: 'Impulse Bot • Dry Run' });
+
+            if (candidates.length > 0 && candidates.length <= 20) {
+                embed.addFields({
+                    name: 'Affected Threads',
+                    value: candidates.map(t => `• ${t.name}`).join('\n')
+                });
+            } else if (candidates.length > 20) {
+                embed.addFields({
+                    name: 'Sample (first 20)',
+                    value: candidates.slice(0, 20).map(t => `• ${t.name}`).join('\n')
+                });
+            }
+
+            return interaction.editReply({ embeds: [embed] });
+        }
+
+        if (candidates.length === 0) {
+            return interaction.editReply(`✅ No threads found older than **${days} days**. Nothing to close.`);
+        }
+
+        // Acknowledge immediately so the interaction doesn't time out
+        await interaction.editReply(
+            `⏳ Processing **${candidates.length}** threads in chunks. This may take a while — you'll get a follow-up when done.`
+        );
+
+        let closed = 0, warned = 0, failed = 0;
+
+        await processInChunks(candidates, async (thread) => {
+            try {
+                if (sendWarn) {
+                    const warnEmbed = new EmbedBuilder()
+                        .setTitle('⚠️ Thread Being Closed by Staff')
+                        .setDescription(
+                            `Hey <@${thread.ownerId}>! This thread is being closed by a moderator as part of a bulk cleanup of threads older than **${days} days**.\n\n` +
+                            `If you still need help, please create a new thread.`
+                        )
+                        .setColor(0xf59e0b)
+                        .setTimestamp()
+                        .setFooter({ text: 'Impulse Bot • Staff Bulk Close' });
+
+                    await thread.send({ content: `<@${thread.ownerId}>`, embeds: [warnEmbed] });
+                    warned++;
+                    await sleep(500); // small extra delay after warning before locking
+                }
+
+                await thread.setLocked(true);
+
+                const closeEmbed = new EmbedBuilder()
+                    .setTitle('🔒 Thread Closed')
+                    .setDescription(
+                        sendWarn
+                            ? 'This thread has been closed as part of a staff cleanup. Create a new thread if you still need help.'
+                            : `This thread has been closed by staff — it was older than **${days} days** with no activity.`
+                    )
+                    .setColor(0x6b7280)
+                    .setTimestamp()
+                    .setFooter({ text: `Impulse Bot • Bulk Close by ${interaction.user.username}` });
+
+                await thread.send({ embeds: [closeEmbed] });
+
+                // Remove from tracking if present
+                db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(thread.id);
+                logAction(
+                    interaction.guildId, "BULK_CLOSE",
+                    `Bulk closed: ${thread.name} (${days}d cutoff)`,
+                    userId, userName, userAvatar,
+                    `/closethreads days:${days} warn:${sendWarn}`,
+                    thread.id, null
+                );
+                closed++;
+            } catch (e) {
+                console.error(`Failed to close thread ${thread.name}:`, e.message);
+                failed++;
+            }
+        }, 3, 2000); // 3 at a time, 2s between chunks
+
+        const resultEmbed = new EmbedBuilder()
+            .setTitle('✅ Bulk Close Complete')
+            .addFields(
+                { name: 'Closed', value: closed.toString(), inline: true },
+                { name: sendWarn ? 'Warned' : 'Silent', value: (sendWarn ? warned : closed).toString(), inline: true },
+                { name: 'Failed', value: failed.toString(), inline: true },
+                { name: 'Cutoff', value: `${days} days`, inline: true },
+            )
+            .setColor(failed > 0 ? 0xf59e0b : 0x10b981)
+            .setTimestamp()
+            .setFooter({ text: `Impulse Bot • Executed by ${interaction.user.username}` });
+
+        await interaction.followUp({ embeds: [resultEmbed], ephemeral: true });
+
+    } catch (err) {
+        console.error('closethreads error:', err);
+        await interaction.editReply('❌ An error occurred during bulk close. Check the PM2 logs.');
+    }
   }
 });
 

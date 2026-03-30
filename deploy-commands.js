@@ -53,7 +53,24 @@ const commands = [
             option.setName('url')
                 .setDescription('The URL to attach to this thread')
                 .setRequired(true)),
-
+    // CLOSETHREADS COMMAND
+    new SlashCommandBuilder()
+        .setName('closethreads')
+        .setDescription('Bulk close stale threads older than a specified number of days')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addIntegerOption(option =>
+            option.setName('days')
+                .setDescription('Close threads older than this many days (minimum 1)')
+                .setRequired(true)
+                .setMinValue(1))
+        .addBooleanOption(option =>
+            option.setName('warn')
+                .setDescription('Send a warning message before closing? (default: false)')
+                .setRequired(false))
+        .addBooleanOption(option =>
+            option.setName('dry_run')
+                .setDescription('Preview how many threads would be closed without actually closing them')
+                .setRequired(false)),
     // BLOCKUSER COMMAND
     new SlashCommandBuilder()
         .setName('blockuser')
