@@ -116,6 +116,50 @@ db.prepare(`
     )
 `).run();
 
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS blocked_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT,
+        user_id TEXT,
+        reason TEXT,
+        blocked_by TEXT,
+        blocked_at INTEGER,
+        UNIQUE(guild_id, user_id)
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS banned_users (
+        user_id TEXT PRIMARY KEY,
+        reason TEXT,
+        banned_by TEXT,
+        banned_at INTEGER
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS command_cooldowns (
+        user_id TEXT,
+        guild_id TEXT,
+        command TEXT,
+        last_used INTEGER,
+        use_count INTEGER DEFAULT 1,
+        PRIMARY KEY (user_id, guild_id, command)
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS suspended_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT,
+        user_id TEXT,
+        reason TEXT,
+        suspended_at INTEGER,
+        expires_at INTEGER,
+        UNIQUE(guild_id, user_id)
+    )
+`).run();
+
 try {
     db.prepare(`ALTER TABLE guild_settings ADD COLUMN fun_features_enabled INTEGER DEFAULT 1`).run();
 } catch (e) { /* Column already exists */ }
@@ -234,6 +278,57 @@ function hasHelperRole(member, settings) {
   if (!settings.helper_role_id) return false;
   const roleIDs = settings.helper_role_id.split(",").map((id) => id.trim());
   return member.roles.cache.some((role) => roleIDs.includes(role.id));
+}
+
+function isUserBlocked(userId, guildId) {
+    const banned = db.prepare("SELECT 1 FROM banned_users WHERE user_id = ?").get(userId);
+    if (banned) return { blocked: true, reason: "You are globally banned from using this bot." };
+    const blocked = db.prepare("SELECT reason FROM blocked_users WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
+    if (blocked) return { blocked: true, reason: `You are blocked from using bot commands in this server.${blocked.reason ? ` Reason: ${blocked.reason}` : ''}` };
+    const suspended = db.prepare("SELECT reason, expires_at FROM suspended_users WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
+    if (suspended) {
+        if (suspended.expires_at && Date.now() > suspended.expires_at) {
+            db.prepare("DELETE FROM suspended_users WHERE user_id = ? AND guild_id = ?").run(userId, guildId);
+            return { blocked: false };
+        }
+        const expiresIn = suspended.expires_at ? `<t:${Math.floor(suspended.expires_at / 1000)}:R>` : 'indefinitely';
+        return { blocked: true, reason: `You are temporarily suspended from using bot commands. Expires ${expiresIn}.` };
+    }
+    return { blocked: false };
+}
+
+// Returns true if the user should be rate limited, auto-suspends on spam
+function checkCooldown(userId, guildId, command, limitSeconds = 10, maxUses = 3) {
+    const now = Date.now();
+    const window = limitSeconds * 1000;
+    const row = db.prepare("SELECT last_used, use_count FROM command_cooldowns WHERE user_id = ? AND guild_id = ? AND command = ?").get(userId, guildId, command);
+    
+    if (!row) {
+        db.prepare("INSERT INTO command_cooldowns (user_id, guild_id, command, last_used, use_count) VALUES (?, ?, ?, ?, 1)").run(userId, guildId, command, now);
+        return { limited: false };
+    }
+
+    const timeSince = now - row.last_used;
+    if (timeSince > window) {
+        // Reset window
+        db.prepare("UPDATE command_cooldowns SET last_used = ?, use_count = 1 WHERE user_id = ? AND guild_id = ? AND command = ?").run(now, userId, guildId, command);
+        return { limited: false };
+    }
+
+    const newCount = row.use_count + 1;
+    db.prepare("UPDATE command_cooldowns SET use_count = ?, last_used = ? WHERE user_id = ? AND guild_id = ? AND command = ?").run(newCount, now, userId, guildId, command);
+
+    if (newCount > maxUses) {
+        // Auto-suspend for 10 minutes on spam
+        const suspendUntil = now + 10 * 60 * 1000;
+        db.prepare("INSERT OR REPLACE INTO suspended_users (guild_id, user_id, reason, suspended_at, expires_at) VALUES (?, ?, ?, ?, ?)").run(
+            guildId, userId, `Auto-suspended: Spammed /${command} ${newCount} times in ${limitSeconds}s`, now, suspendUntil
+        );
+        return { limited: true, suspended: true, message: `⚠️ You've been temporarily suspended for 10 minutes due to command spam.` };
+    }
+
+    const retryAfter = Math.ceil((window - timeSince) / 1000);
+    return { limited: true, message: `⏳ Slow down! You can use this command again in **${retryAfter}s**.` };
 }
 
 function parseVars(text, interaction = null) {
@@ -409,6 +504,11 @@ const getActionColor = (action) => {
     LINK_ACCESSED: "bg-purple-500/10 text-purple-500 border-purple-500/20",
     LINK_REMOVED: "bg-red-500/10 text-red-500 border-red-500/20",
     TRIGGER_CREATE: "bg-pink-500/10 text-pink-400 border-pink-500/20",
+    USER_BLOCKED: "bg-red-600/10 text-red-400 border-red-600/20",
+    USER_UNBLOCKED: "bg-teal-500/10 text-teal-400 border-teal-500/20",
+    USER_BANNED: "bg-red-900/20 text-red-300 border-red-900/30",
+    USER_UNBANNED: "bg-teal-600/10 text-teal-300 border-teal-600/20",
+    AUTO_SUSPEND: "bg-orange-500/10 text-orange-400 border-orange-500/20",
   };
   return colors[action] || "bg-slate-800 text-slate-400 border-slate-700";
 };
@@ -668,29 +768,100 @@ app.get("/", async (req, res) => {
 
             <!-- INFO FOOTER -->
             <footer class="mt-12 pt-8 border-t border-slate-800/50">
-                <div class="max-w-3xl mx-auto text-center space-y-4">
-                    <div class="flex items-center justify-center gap-3 mb-4">
-                        <img src="${botAvatar}" class="w-8 h-8 rounded-full border border-[#FFAA00]/30">
-                        <h3 class="text-sm font-black text-[#FFAA00] uppercase tracking-widest">Impulse Dashboard</h3>
+                <div class="max-w-5xl mx-auto space-y-6">
+
+                    <!-- Bot Status Bar -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex items-center gap-3">
+                            <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></div>
+                            <div>
+                                <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Bot Status</p>
+                                <p class="text-xs font-bold text-emerald-400">Online</p>
+                            </div>
+                        </div>
+                        <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
+                            <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Uptime</p>
+                            <p class="text-xs font-bold text-white mono" id="uptimeDisplay">calculating...</p>
+                        </div>
+                        <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
+                            <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Dashboard</p>
+                            <div class="flex items-center gap-2">
+                                <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                <p class="text-xs font-bold text-emerald-400">Operational</p>
+                            </div>
+                        </div>
+                        <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
+                            <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Version</p>
+                            <p class="text-xs font-bold text-[#FFAA00]">2.5.0 • Stable</p>
+                        </div>
                     </div>
-                    
-                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-6 backdrop-blur-sm">
+
+                    <!-- Bot Specs -->
+                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4">System Specs</p>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                            <div>
+                                <p class="text-lg font-black text-white">${client.guilds.cache.size}</p>
+                                <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Servers</p>
+                            </div>
+                            <div>
+                                <p class="text-lg font-black text-white">${client.users.cache.size}</p>
+                                <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Cached Users</p>
+                            </div>
+                            <div>
+                                <p class="text-lg font-black text-white">${db.prepare("SELECT COUNT(*) as c FROM blocked_users").get().c}</p>
+                                <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Blocked Users</p>
+                            </div>
+                            <div>
+                                <p class="text-lg font-black text-white">${db.prepare("SELECT COUNT(*) as c FROM banned_users").get().c}</p>
+                                <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Banned Users</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Privacy + Report Bug -->
+                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-6">
                         <p class="text-xs text-slate-400 leading-relaxed mb-3">
                             <span class="text-[#FFAA00] font-bold">Privacy Notice:</span> This dashboard does not store, collect, or use any personal user data. 
                             It only accesses Discord OAuth2 to verify your server membership and display relevant information from servers where the bot is installed.
                         </p>
-                        <p class="text-[10px] text-slate-500 italic">
-                            All data is pulled in real-time and nothing is cached or saved beyond your active session.
-                        </p>
+                        <p class="text-[10px] text-slate-500 italic">All data is pulled in real-time and nothing is cached or saved beyond your active session.</p>
                     </div>
 
-                    <div class="flex items-center justify-center gap-6 text-[9px] text-slate-600 uppercase tracking-wider font-bold">
-                        <span>Built for Gups Command Central</span>
-                        <span class="text-slate-800">•</span>
-                        <span>Powered by Discord.js</span>
+                    <!-- Footer Links -->
+                    <div class="flex flex-col md:flex-row items-center justify-between gap-4 pb-4">
+                        <div class="flex items-center gap-3">
+                            <img src="${botAvatar}" class="w-7 h-7 rounded-full border border-[#FFAA00]/30">
+                            <div>
+                                <p class="text-[10px] font-black text-[#FFAA00] uppercase tracking-widest">Impulse Dashboard</p>
+                                <p class="text-[9px] text-slate-600">Built for Gups Command Central • Powered by Discord.js</p>
+                            </div>
+                        </div>
+                        <a href="https://discord.com/users/809204882997248091" 
+                          target="_blank"
+                          class="flex items-center gap-2 bg-rose-900/30 hover:bg-rose-900/50 border border-rose-800/50 text-rose-300 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                            </svg>
+                            Report a Bug
+                        </a>
                     </div>
                 </div>
             </footer>
+            <script>
+                const botStartTime = ${Date.now() - process.uptime() * 1000};
+                function updateUptime() {
+                    const diff = Date.now() - botStartTime;
+                    const d = Math.floor(diff / 86400000);
+                    const h = Math.floor((diff % 86400000) / 3600000);
+                    const m = Math.floor((diff % 3600000) / 60000);
+                    const s = Math.floor((diff % 60000) / 1000);
+                    document.getElementById('uptimeDisplay').innerText = 
+                        (d > 0 ? d + 'd ' : '') + (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
+                }
+                setInterval(updateUptime, 1000);
+                updateUptime();
+            </script>
         </div>
         <script>
             function updateTimers() {
@@ -815,6 +986,11 @@ app.get("/logs", async (req, res) => {
     "LINK_ACCESSED",
     "LINK_REMOVED",
     "TRIGGER_CREATE",
+    "USER_BLOCKED",
+    "USER_UNBLOCKED",
+    "USER_BANNED",
+    "USER_UNBANNED",
+    "AUTO_SUSPEND",
   ];
 
   const managedGuilds = managedGuildIds.map((id) => {
@@ -2769,6 +2945,28 @@ client.on("interactionCreate", async (interaction) => {
   const userName = interaction.user.username;
   const userAvatar = interaction.user.displayAvatarURL();
 
+  // Block/ban/suspend check — skip for admin commands
+  const adminCommands = ['setup', 'blockuser', 'unblockuser', 'banuser', 'unbanuser'];
+  if (!adminCommands.includes(interaction.commandName)) {
+    const blockCheck = isUserBlocked(userId, interaction.guildId);
+    if (blockCheck.blocked) {
+      return interaction.reply({ content: `🚫 ${blockCheck.reason}`, ephemeral: true });
+    }
+
+    // Cooldown check for spammable commands
+    const cooldownCommands = { snippet: [15, 3], reactmessage: [30, 2], link: [60, 2], duplicate: [30, 3] };
+    if (cooldownCommands[interaction.commandName]) {
+      const [secs, max] = cooldownCommands[interaction.commandName];
+      const cd = checkCooldown(userId, interaction.guildId, interaction.commandName, secs, max);
+      if (cd.limited) {
+        if (cd.suspended) {
+          logAction(interaction.guildId, "AUTO_SUSPEND", `Auto-suspended for spamming /${interaction.commandName}`, userId, userName, userAvatar, `/${interaction.commandName}`, null, null);
+        }
+        return interaction.reply({ content: cd.message, ephemeral: true });
+      }
+    }
+  }
+
   if (interaction.commandName === "setup") {
     if (
       !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
@@ -3314,6 +3512,51 @@ client.on("interactionCreate", async (interaction) => {
         null
     );
     return interaction.reply({ content: `✅ Trigger set! When **${targetUser.username}**'s message gets ${count}x ${reaction}, I'll reply: "${text}"`, ephemeral: true });
+  }
+
+  if (interaction.commandName === 'blockuser') {
+    const target = interaction.options.getUser('user');
+    const reason = interaction.options.getString('reason') || null;
+    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+    const isHelper = hasHelperRole(interaction.member, settings);
+    if (!isAdmin && !isHelper) return interaction.reply({ content: '❌ Access Denied.', ephemeral: true });
+
+    db.prepare("INSERT OR REPLACE INTO blocked_users (guild_id, user_id, reason, blocked_by, blocked_at) VALUES (?, ?, ?, ?, ?)").run(
+        interaction.guildId, target.id, reason, userId, Date.now()
+    );
+    logAction(interaction.guildId, "USER_BLOCKED", `${target.username} blocked${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/blockuser`, null, null);
+    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🚫 User Blocked').setDescription(`**${target.username}** has been blocked from using bot commands in this server.${reason ? `\n**Reason:** ${reason}` : ''}`).setColor(0xef4444).setTimestamp()], ephemeral: true });
+  }
+
+  if (interaction.commandName === 'unblockuser') {
+    const target = interaction.options.getUser('user');
+    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+    const isHelper = hasHelperRole(interaction.member, settings);
+    if (!isAdmin && !isHelper) return interaction.reply({ content: '❌ Access Denied.', ephemeral: true });
+
+    db.prepare("DELETE FROM blocked_users WHERE guild_id = ? AND user_id = ?").run(interaction.guildId, target.id);
+    db.prepare("DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?").run(interaction.guildId, target.id);
+    logAction(interaction.guildId, "USER_UNBLOCKED", `${target.username} unblocked`, userId, userName, userAvatar, `/unblockuser`, null, null);
+    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('✅ User Unblocked').setDescription(`**${target.username}** can now use bot commands again.`).setColor(0x10b981).setTimestamp()], ephemeral: true });
+  }
+
+  if (interaction.commandName === 'banuser') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: '❌ Administrator only.', ephemeral: true });
+    const target = interaction.options.getUser('user');
+    const reason = interaction.options.getString('reason') || null;
+
+    db.prepare("INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)").run(target.id, reason, userId, Date.now());
+    logAction(interaction.guildId, "USER_BANNED", `${target.username} globally banned${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/banuser`, null, null);
+    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🔨 User Globally Banned').setDescription(`**${target.username}** is banned from using this bot in all servers.${reason ? `\n**Reason:** ${reason}` : ''}`).setColor(0x7f1d1d).setTimestamp()], ephemeral: true });
+  }
+
+  if (interaction.commandName === 'unbanuser') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: '❌ Administrator only.', ephemeral: true });
+    const target = interaction.options.getUser('user');
+
+    db.prepare("DELETE FROM banned_users WHERE user_id = ?").run(target.id);
+    logAction(interaction.guildId, "USER_UNBANNED", `${target.username} globally unbanned`, userId, userName, userAvatar, `/unbanuser`, null, null);
+    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('✅ User Unbanned').setDescription(`**${target.username}** can now use this bot again.`).setColor(0x10b981).setTimestamp()], ephemeral: true });
   }
 });
 

@@ -54,6 +54,35 @@ const commands = [
                 .setDescription('The URL to attach to this thread')
                 .setRequired(true)),
 
+    // BLOCKUSER COMMAND
+    new SlashCommandBuilder()
+        .setName('blockuser')
+        .setDescription('Block a user from using bot commands in this server')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+        .addUserOption(option => option.setName('user').setDescription('User to block').setRequired(true))
+        .addStringOption(option => option.setName('reason').setDescription('Reason for blocking').setRequired(false)),
+
+    // UNBLOCKUSER COMMAND
+    new SlashCommandBuilder()
+        .setName('unblockuser')
+        .setDescription('Unblock a previously blocked user')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+        .addUserOption(option => option.setName('user').setDescription('User to unblock').setRequired(true)),
+
+    // BANUSER COMMAND
+    new SlashCommandBuilder()
+        .setName('banuser')
+        .setDescription('Ban a user from the bot entirely (all servers)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addUserOption(option => option.setName('user').setDescription('User to ban').setRequired(true))
+        .addStringOption(option => option.setName('reason').setDescription('Reason for ban').setRequired(false)),
+
+    // UNBANUSER COMMAND
+    new SlashCommandBuilder()
+        .setName('unbanuser')
+        .setDescription('Unban a bot-banned user')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addUserOption(option => option.setName('user').setDescription('User to unban').setRequired(true)),
     // REMOVELINK COMMAND (NEW!)
     new SlashCommandBuilder()
         .setName('removelink')
