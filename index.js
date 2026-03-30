@@ -408,6 +408,7 @@ const getActionColor = (action) => {
     LINK_ADDED: "bg-blue-600/10 text-blue-600 border-blue-600/20",
     LINK_ACCESSED: "bg-purple-500/10 text-purple-500 border-purple-500/20",
     LINK_REMOVED: "bg-red-500/10 text-red-500 border-red-500/20",
+    TRIGGER_CREATE: "bg-pink-500/10 text-pink-400 border-pink-500/20",
   };
   return colors[action] || "bg-slate-800 text-slate-400 border-slate-700";
 };
@@ -813,6 +814,7 @@ app.get("/logs", async (req, res) => {
     "LINK_ADDED",
     "LINK_ACCESSED",
     "LINK_REMOVED",
+    "TRIGGER_CREATE",
   ];
 
   const managedGuilds = managedGuildIds.map((id) => {
@@ -1393,7 +1395,7 @@ app.get("/threads", async (req, res) => {
 });
 
 app.get("/invite", (req, res) => {
-  const permissions = "275146410048";
+  const permissions = "292057869376";
   const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`;
 
   const botAvatar = client.user?.displayAvatarURL() || '';
@@ -2223,6 +2225,12 @@ app.get("/fun", async (req, res) => {
     const selectedGuildId = req.query.guild || managedGuilds[0];
     const settings = getSettings(selectedGuildId);
     const triggers = db.prepare("SELECT * FROM reaction_triggers WHERE guild_id = ?").all(selectedGuildId);
+    const funEnabled = settings?.fun_features_enabled !== 0;
+
+    const guildNames = managedGuilds.map(id => {
+        const g = client.guilds.cache.get(id);
+        return { id, name: g ? g.name : id };
+    });
 
     res.send(`
         <html>
@@ -2234,42 +2242,62 @@ app.get("/fun", async (req, res) => {
                 <div class="flex items-center justify-between mb-8">
                     <div>
                         <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Fun <span class="text-[#FFAA00]">Features</span></h1>
-                        <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Interactive Triggers & Social Automation</p>
+                        <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Reaction Triggers & Auto-Replies</p>
                     </div>
-                    
-                    <div class="flex items-center gap-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800">
-                        <span class="text-[10px] font-black uppercase tracking-widest ${settings.fun_features_enabled ? 'text-emerald-400' : 'text-rose-500'}">
-                            ${settings.fun_features_enabled ? '● System Active' : '○ System Offline'}
-                        </span>
-                        <div class="w-12 h-6 bg-slate-800 rounded-full relative cursor-pointer border border-slate-700">
-                            <div class="absolute top-1 ${settings.fun_features_enabled ? 'right-1 bg-emerald-500' : 'left-1 bg-slate-600'} w-4 h-4 rounded-full transition-all"></div>
-                        </div>
+                    <div class="flex items-center gap-3">
+                        ${guildNames.length > 1 ? `
+                        <select onchange="window.location='/fun?guild='+this.value" class="bg-slate-900 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg outline-none focus:border-[#FFAA00]">
+                            ${guildNames.map(g => `<option value="${g.id}" ${g.id === selectedGuildId ? 'selected' : ''}>${g.name}</option>`).join('')}
+                        </select>` : `<span class="text-[10px] font-black text-slate-500 uppercase">${guildNames[0]?.name || 'Server'}</span>`}
+                        <a href="/fun/toggle?guild=${selectedGuildId}" class="flex items-center gap-3 bg-slate-900/50 px-4 py-2 rounded-2xl border border-slate-800 cursor-pointer hover:border-[#FFAA00]/30 transition">
+                            <span class="text-[10px] font-black uppercase tracking-widest ${funEnabled ? 'text-emerald-400' : 'text-rose-500'}">
+                                ${funEnabled ? '● System Active' : '○ System Offline'}
+                            </span>
+                        </a>
                     </div>
                 </div>
 
+                ${triggers.length === 0 ? `
+                <div class="text-center py-20">
+                    <p class="text-slate-600 text-sm font-bold uppercase tracking-widest mb-2">No Active Triggers</p>
+                    <p class="text-slate-700 text-xs">Use <code class="bg-slate-800 px-2 py-0.5 rounded text-[#FFAA00]">/reactmessage</code> in Discord to create one.</p>
+                </div>` : `
                 <div class="grid gap-4">
                     ${triggers.map(t => `
-                        <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                        <div class="bg-slate-900/40 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
                             <div class="flex items-center gap-4">
-                                <div class="w-10 h-10 bg-[#FFAA00]/10 rounded-lg flex items-center justify-center text-[#FFAA00] font-bold">
+                                <div class="w-12 h-12 bg-[#FFAA00]/10 rounded-xl flex items-center justify-center text-2xl border border-[#FFAA00]/20">
                                     ${t.reaction_id}
                                 </div>
                                 <div>
-                                    <p class="text-white font-bold text-sm">Target User: <span class="mono text-[#FFAA00]">${t.target_user_id}</span></p>
-                                    <p class="text-[10px] text-slate-500 uppercase font-bold">Reply: "${t.response_text}" • Threshold: ${t.trigger_count}</p>
+                                    <p class="text-white font-bold text-sm">Target: <span class="text-[#FFAA00] mono"><@${t.target_user_id}></span></p>
+                                    <p class="text-[10px] text-slate-400 uppercase font-bold mt-0.5">Threshold: ${t.trigger_count} reactions</p>
+                                    <p class="text-xs text-slate-500 mt-1">Reply: <span class="text-slate-300 italic">"${t.response_text}"</span></p>
                                 </div>
                             </div>
-                            <a href="/fun/delete/${t.id}?guild=${selectedGuildId}" 
-                               onclick="return confirm('Delete this trigger?')"
-                               class="text-rose-500 hover:text-rose-400 text-[10px] font-black uppercase tracking-widest">Delete</a>
+                            <div class="flex items-center gap-4">
+                                <span class="text-[9px] px-2 py-1 rounded border font-black uppercase ${t.enabled ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-rose-400 border-rose-500/20 bg-rose-500/10'}">${t.enabled ? 'Enabled' : 'Disabled'}</span>
+                                <a href="/fun/delete/${t.id}?guild=${selectedGuildId}" 
+                                   onclick="return confirm('Delete this trigger?')"
+                                   class="text-rose-500 hover:text-rose-400 text-[10px] font-black uppercase tracking-widest transition">Delete</a>
+                            </div>
                         </div>
                     `).join('')}
-                    ${triggers.length === 0 ? '<p class="text-center text-slate-600 py-12 italic">No active triggers. Use /lcolor in Discord to create one.</p>' : ''}
-                </div>
+                </div>`}
             </div>
         </body>
         </html>
     `);
+});
+
+app.get("/fun/toggle", (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+    const guildId = req.query.guild;
+    if (!guildId) return res.redirect("/fun");
+    const managedGuilds = getManagedGuilds(req.user.id);
+    if (!managedGuilds.includes(guildId)) return res.status(403).send(getErrorPage("Access Denied", "Unauthorized."));
+    db.prepare("UPDATE guild_settings SET fun_features_enabled = CASE WHEN fun_features_enabled = 1 THEN 0 ELSE 1 END WHERE guild_id = ?").run(guildId);
+    res.redirect(`/fun?guild=${guildId}`);
 });
 
 app.use((req, res) => {
@@ -3274,7 +3302,18 @@ client.on("interactionCreate", async (interaction) => {
           interaction.guildId, targetUser.id, reaction, count, text
       );
 
-      return interaction.reply({ content: `✅ Trigger set! When **${targetUser.username}**'s message gets ${count}x ${reaction}, I'll reply: "${text}"`, ephemeral: true });
+      logAction(
+        interaction.guildId,
+        "TRIGGER_CREATE",
+        `Reaction trigger set for ${targetUser.username}: ${count}x ${reaction} → "${text}"`,
+        interaction.user.id,
+        interaction.user.username,
+        interaction.user.displayAvatarURL(),
+        `/reactmessage`,
+        null,
+        null
+    );
+    return interaction.reply({ content: `✅ Trigger set! When **${targetUser.username}**'s message gets ${count}x ${reaction}, I'll reply: "${text}"`, ephemeral: true });
   }
 });
 
