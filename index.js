@@ -1393,8 +1393,8 @@ app.get("/threads", async (req, res) => {
 });
 
 app.get("/invite", (req, res) => {
-  const permissions = "274909764608";
-  const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands&guild_id=&disable_guild_select=true`;
+  const permissions = "275146410048";
+  const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`;
 
   const botAvatar = client.user?.displayAvatarURL() || '';
 
@@ -2150,6 +2150,7 @@ app.post(
         req.user.username,
         `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
         null,
+        null,
         null
       );
 
@@ -2196,11 +2197,12 @@ app.get("/snippets/delete/:id", async (req, res) => {
   res.redirect("/snippets");
 });
 
-app.get("/snippets/toggle/:id", (req, res) => {
+app.get("/snippets/toggle/:id", async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
   const snippet = db
     .prepare(`SELECT * FROM snippets WHERE id = ?`)
     .get(req.params.id);
-  if (!snippet || !canManageSnippet(req, snippet))
+  if (!snippet || !(await canManageSnippet(req, snippet.guild_id)))
     return res.redirect("/snippets");
 
   db.prepare(
@@ -3254,18 +3256,6 @@ client.on("interactionCreate", async (interaction) => {
 
     return interaction.reply({ content: `✅ Trigger set for **${targetUser.username}**!`, ephemeral: true });
 }
-});
-
-app.use((req, res) => {
-  res
-    .status(404)
-    .send(
-      getErrorPage(
-        "Module Offline",
-        "The system route you are attempting to access does not exist.",
-        "404"
-      )
-    );
 });
 
 client.login(process.env.DISCORD_TOKEN);
