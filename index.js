@@ -3324,7 +3324,7 @@ client.on("threadCreate", async (thread) => {
     .setDescription(
       `Hey <@${thread.ownerId}>!\n\n` +
         `**What happens next?**\n` +
-        `• A command helper will assist you shortly\n` +
+        `• A command helper will help you soon!\n` +
         `• Use \`/resolved\` when your issue is fixed\n` +
         `• The thread will auto-lock 30 minutes after being marked resolved\n\n` +
         `*Please provide as much detail as possible about your issue!*`
