@@ -417,13 +417,13 @@ function checkCooldown(userId, guildId, command, limitSeconds = 10, maxUses = 3)
     const newCount = row.use_count + 1;
     db.prepare("UPDATE command_cooldowns SET use_count = ?, last_used = ? WHERE user_id = ? AND guild_id = ? AND command = ?").run(newCount, now, userId, guildId, command);
 
-    if (newCount > maxUses) {
-        // Auto-suspend for 10 minutes on spam
-        const suspendUntil = now + 10 * 60 * 1000;
+    if (newCount > maxUses * 2) {
+        // Only auto-suspend if they hit DOUBLE the limit — genuine spam
+        const suspendUntil = now + 5 * 60 * 1000; // 5 min instead of 10
         db.prepare("INSERT OR REPLACE INTO suspended_users (guild_id, user_id, reason, suspended_at, expires_at) VALUES (?, ?, ?, ?, ?)").run(
             guildId, userId, `Auto-suspended: Spammed /${command} ${newCount} times in ${limitSeconds}s`, now, suspendUntil
         );
-        return { limited: true, suspended: true, message: `⚠️ You've been temporarily suspended for 10 minutes due to command spam.` };
+        return { limited: true, suspended: true, message: `⚠️ You've been temporarily suspended for **5 minutes** due to excessive command spam.` };
     }
 
     const retryAfter = Math.ceil((window - timeSince) / 1000);
@@ -3253,7 +3253,7 @@ client.once("clientReady", async (c) => {
           const lockEmbed = new EmbedBuilder()
             .setTitle("🔒 Thread Locked")
             .setDescription(
-              "This thread has been marked as resolved and is now closed. Thank you for using our support forum!"
+              `This thread was marked as resolved and has now been locked as of <t:${Math.floor(Date.now() / 1000)}:F>. Thank you for using our support forum!`
             )
             .setColor(IMPULSE_COLOR)
             .setTimestamp()
@@ -3321,12 +3321,13 @@ async function checkStaleThreads() {
             return;
         }
 
+        const closeTime = Math.floor((Date.now() + 6 * 60 * 60 * 1000) / 1000);
         const warningEmbed = new EmbedBuilder()
             .setTitle("⚠️ Thread Inactivity Warning")
             .setDescription(
-                `Hey <@${thread.ownerId}>! This thread has been inactive for **24 days** and will be automatically closed in **6 hours**.\n\n` +
+                `Hey <@${thread.ownerId}>! This thread has been inactive since <t:${Math.floor(tracked.created_at / 1000)}:D> and will be automatically closed <t:${closeTime}:R> at <t:${closeTime}:t>.\n\n` +
                 `**To keep this thread open:**\n• Reply to this thread, OR\n• Use \`/cancel\` to renew it\n\n` +
-                `If you no longer need help, you can safely ignore this.`
+                `If you no longer need help, you can ignore this.`
             )
             .setColor(0xf59e0b)
             .setTimestamp()
@@ -3363,11 +3364,13 @@ async function checkStaleThreads() {
 
         await thread.setLocked(true);
         const autoCloseEmbed = new EmbedBuilder()
-            .setTitle("🔒 Thread Auto-Closed")
-            .setDescription("This thread has been automatically closed due to 30+ days of inactivity. If you still need help, please create a new thread.")
-            .setColor(0x6b7280)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot • Auto-Close" });
+        .setTitle("🔒 Thread Auto-Closed")
+        .setDescription(
+          `This thread was opened <t:${Math.floor(tracked.created_at / 1000)}:R> and has been automatically closed due to inactivity. If you still need help, please create a new thread.`
+        )
+        .setColor(0x6b7280)
+        .setTimestamp()
+        .setFooter({ text: "Impulse Bot • Auto-Close" });
 
         await thread.send({ embeds: [autoCloseEmbed] });
         logAction(tracked.guild_id, "AUTO_CLOSE", `Auto-closed stale thread: ${thread.name}`);
@@ -3591,7 +3594,14 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // Cooldown check for spammable commands
-    const cooldownCommands = { snippet: [15, 3], reactmessage: [30, 2], link: [60, 2], duplicate: [30, 3] };
+    const cooldownCommands = { 
+        snippet: [30, 5],        // 5 uses per 30s (was 3 per 15s)
+        reactmessage: [60, 3],   // 3 uses per 60s (was 2 per 30s)
+        link: [120, 3],          // 3 uses per 2min (was 2 per 60s)
+        duplicate: [60, 5],      // 5 uses per 60s (was 3 per 30s)
+        resolved: [30, 3],       // new — wasn't rate limited before
+        closethreads: [300, 2],  // new — bulk command, 2 per 5min
+    };
     if (cooldownCommands[interaction.commandName]) {
       const [secs, max] = cooldownCommands[interaction.commandName];
       const cd = checkCooldown(userId, interaction.guildId, interaction.commandName, secs, max);
@@ -3734,13 +3744,11 @@ client.on("interactionCreate", async (interaction) => {
     const resolvedEmbed = new EmbedBuilder()
       .setTitle("✅ Thread Marked as Resolved")
       .setDescription(
-        `This thread will automatically lock <t:${Math.floor(
-          lockTime / 1000
-        )}:R>.`
+        `This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R> at <t:${Math.floor(lockTime / 1000)}:t>.`
       )
       .setColor(0x10b981)
       .setTimestamp()
-      .setFooter({ text: "Impulse Bot • Timer: 30m" });
+      .setFooter({ text: "Impulse Bot • Auto-lock scheduled" });
 
     const reply = await interaction.reply({
       embeds: [resolvedEmbed],
@@ -3784,7 +3792,7 @@ client.on("interactionCreate", async (interaction) => {
         embeds: [
           new EmbedBuilder()
             .setTitle("🔓 Lock Timer Cancelled")
-            .setDescription("The automatic lock has been cancelled.")
+            .setDescription(`The automatic lock has been cancelled. Thread renewed <t:${Math.floor(Date.now() / 1000)}:R>.`)
             .setColor(0xf59e0b),
         ],
         fetchReply: true,
@@ -3817,7 +3825,7 @@ client.on("interactionCreate", async (interaction) => {
         embeds: [
           new EmbedBuilder()
             .setTitle("♻️ Thread Renewed")
-            .setDescription("The 30-day inactivity timer has been reset.")
+            .setDescription(`The inactivity timer has been reset as of <t:${Math.floor(Date.now() / 1000)}:F>. No further warnings will be sent for 30 days.`)
             .setColor(0x10b981),
         ],
         fetchReply: true,
@@ -4380,7 +4388,7 @@ client.on("interactionCreate", async (interaction) => {
                     const warnEmbed = new EmbedBuilder()
                         .setTitle('⚠️ Thread Being Closed by Staff')
                         .setDescription(
-                            `Hey <@${thread.ownerId}>! This thread is being closed by a moderator as part of a bulk cleanup of threads older than **${days} days**.\n\n` +
+                            `Hey <@${thread.ownerId}>! This thread (opened <t:${Math.floor(thread.createdTimestamp / 1000)}:D>) is being closed by a moderator as part of a cleanup of threads older than **${days} days**.\n\n` +
                             `If you still need help, please create a new thread.`
                         )
                         .setColor(0xf59e0b)
