@@ -8,6 +8,7 @@ const {
 } = require("discord.js");
 const Database = require("better-sqlite3");
 const express = require("express");
+const cookieParser = require('cookie-parser');
 const passport = require("passport");
 const { Strategy } = require("passport-discord");
 const session = require("express-session");
@@ -203,6 +204,7 @@ const getSettings = (guildId) =>
 function getNav(activePage, user) {
   const current = activePage === "home" ? "overview" : activePage;
   const pages = ["overview", "snippets", "threads", "fun", "logs"];
+  const isAdmin = user && user.id === process.env.ADMIN_DISCORD_ID;
 
   const profileSection = user
     ? `
@@ -227,10 +229,10 @@ function getNav(activePage, user) {
         </div>
 
         <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-md">
-            ${pages
+            ${[...pages, ...(isAdmin ? ["admin"] : [])]
               .map(
                 (p) => `
-                <a href="/${p === "overview" ? "" : p}" 
+                <a href="/${p === "overview" ? "" : p}"
                    class="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                      current === p
                        ? "bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10"
@@ -246,6 +248,42 @@ function getNav(activePage, user) {
         ${profileSection}
     </nav>
     `;
+}
+
+function getAdminNav(activePage) {
+    const pages = ['overview', 'users', 'errors', 'database', 'system'];
+    return `
+    <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
+        <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/40 flex items-center justify-center">
+                <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-lg font-black text-white uppercase tracking-tighter leading-none">Impulse <span class="text-red-400">Admin</span></h1>
+                <p class="text-[8px] font-bold text-red-500 uppercase tracking-[0.3em]">Control Panel • Restricted</p>
+            </div>
+        </div>
+
+        <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-red-900/30 backdrop-blur-md">
+            ${pages.map(p => `
+                <a href="/admin/${p === 'overview' ? '' : p}" 
+                   class="px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                     activePage === p
+                       ? "bg-red-500 text-white shadow-lg shadow-red-500/20"
+                       : "text-slate-500 hover:text-white"
+                   }">
+                    ${p}
+                </a>
+            `).join('')}
+        </div>
+
+        <div class="flex items-center gap-3">
+            <span class="text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-3 py-1.5 rounded-lg border border-red-500/20">⚡ Root Access</span>
+            <a href="/admin/logout" class="text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-widest transition">Terminate →</a>
+        </div>
+    </nav>`;
 }
 
 const logAction = (
@@ -432,7 +470,42 @@ app.use(
   })
 );
 app.use(passport.initialize());
+app.use(cookieParser());
 app.use(passport.session());
+
+const adminSessions = new Map();
+function getAdminSession(req) {
+    const token = req.cookies?.admin_token;
+    if (!token) return null;
+    const session = adminSessions.get(token);
+    if (!session) return null;
+    if (Date.now() > session.expires) {
+        adminSessions.delete(token);
+        return null;
+    }
+    session.expires = Date.now() + 2 * 60 * 60 * 1000; // refresh on activity
+    return session;
+}
+
+function requireAdmin(req, res, next) {
+    // Layer 2: Must be logged in via Discord OAuth
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    
+    // Layer 2: Must be your specific Discord account
+    if (req.user.id !== process.env.ADMIN_DISCORD_ID) {
+        return res.status(403).send(getErrorPage(
+            "Access Denied",
+            "This area is restricted to authorized personnel only.",
+            "403"
+        ));
+    }
+
+    // Layer 3: Must have active admin session token
+    const adminSession = getAdminSession(req);
+    if (!adminSession) return res.redirect('/admin/login');
+
+    next();
+}
 
 // --- ROUTES ---
 app.get("/auth/discord", passport.authenticate("discord"));
@@ -2478,6 +2551,483 @@ app.get("/fun/toggle", (req, res) => {
     res.redirect(`/fun?guild=${guildId}`);
 });
 
+// ============================================================
+// ADMIN PANEL ROUTES
+// ============================================================
+
+app.get('/admin/login', (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    if (req.user.id !== process.env.ADMIN_DISCORD_ID) {
+        return res.status(403).send(getErrorPage("Access Denied", "Restricted area.", "403"));
+    }
+
+    const error = req.query.error;
+    res.send(`
+        <html>
+        ${getHead("Impulse | Admin Access")}
+        <body class="bg-[#0b0f1a] text-white flex items-center justify-center min-h-screen p-6">
+            <div class="max-w-sm w-full">
+                <div class="text-center mb-8">
+                    <div class="inline-flex w-16 h-16 rounded-2xl bg-red-500/20 border border-red-500/40 items-center justify-center mb-4">
+                        <svg class="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                        </svg>
+                    </div>
+                    <h1 class="text-2xl font-black uppercase tracking-tight">Admin <span class="text-red-400">Verification</span></h1>
+                    <p class="text-slate-500 text-[10px] uppercase tracking-widest mt-2">Enter your admin passphrase to continue</p>
+                </div>
+
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-2xl">
+                    ${error ? `<div class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold px-4 py-3 rounded-xl mb-4 uppercase tracking-widest">❌ ${error}</div>` : ''}
+                    <form method="POST" action="/admin/login" class="space-y-4">
+                        <div>
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Passphrase</label>
+                            <input type="password" name="secret" autofocus
+                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:border-red-500 outline-none font-mono"
+                                placeholder="••••••••••••">
+                        </div>
+                        <button type="submit" class="w-full bg-red-500 hover:bg-red-400 text-white py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-red-500/20">
+                            Authenticate
+                        </button>
+                    </form>
+                    <p class="text-[9px] text-center text-slate-600 mt-4 uppercase tracking-widest">This session expires after 2 hours of inactivity</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `);
+});
+
+app.post('/admin/login', express.urlencoded({ extended: true }), (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
+    if (req.user.id !== process.env.ADMIN_DISCORD_ID) return res.status(403).send('Forbidden');
+
+    if (req.body.secret !== process.env.ADMIN_SECRET) {
+        return res.redirect('/admin/login?error=Invalid+passphrase');
+    }
+
+    const token = require('crypto').randomBytes(32).toString('hex');
+    adminSessions.set(token, {
+        userId: req.user.id,
+        expires: Date.now() + 2 * 60 * 60 * 1000
+    });
+
+    res.cookie('admin_token', token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+        maxAge: 2 * 60 * 60 * 1000
+    });
+
+    res.redirect('/admin');
+});
+
+app.get('/admin/logout', (req, res) => {
+    const token = req.cookies?.admin_token;
+    if (token) adminSessions.delete(token);
+    res.clearCookie('admin_token');
+    res.redirect('/');
+});
+
+// ADMIN OVERVIEW
+app.get('/admin', requireAdmin, (req, res) => {
+    const stats = {
+        guilds: client.guilds.cache.size,
+        users: client.users.cache.size,
+        totalLogs: db.prepare("SELECT COUNT(*) as c FROM audit_logs").get().c,
+        totalSnippets: db.prepare("SELECT COUNT(*) as c FROM snippets").get().c,
+        totalThreads: db.prepare("SELECT COUNT(*) as c FROM thread_tracking").get().c,
+        pendingLocks: db.prepare("SELECT COUNT(*) as c FROM pending_locks").get().c,
+        blockedUsers: db.prepare("SELECT COUNT(*) as c FROM blocked_users").get().c,
+        bannedUsers: db.prepare("SELECT COUNT(*) as c FROM banned_users").get().c,
+        suspendedUsers: db.prepare("SELECT COUNT(*) as c FROM suspended_users WHERE expires_at > ?").get(Date.now()).c,
+        recentErrors: db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE action = 'ERROR' AND timestamp > datetime('now', '-24 hours')").get().c,
+    };
+
+    const recentLogs = db.prepare("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 20").all();
+    const allGuilds = db.prepare("SELECT * FROM guild_settings").all();
+
+    res.send(`
+        <html>
+        ${getHead("Impulse | Admin Control Panel")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            ${getAdminNav('overview')}
+
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Global <span class="text-red-400">Overview</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Full system visibility • Root access</p>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+                ${[
+                    { label: 'Servers', value: stats.guilds, color: 'amber' },
+                    { label: 'Cached Users', value: stats.users, color: 'blue' },
+                    { label: 'Total Logs', value: stats.totalLogs, color: 'slate' },
+                    { label: 'Active Threads', value: stats.totalThreads, color: 'emerald' },
+                    { label: 'Pending Locks', value: stats.pendingLocks, color: 'orange' },
+                    { label: 'Blocked Users', value: stats.blockedUsers, color: 'red' },
+                    { label: 'Banned Users', value: stats.bannedUsers, color: 'red' },
+                    { label: 'Suspended', value: stats.suspendedUsers, color: 'yellow' },
+                    { label: 'Snippets', value: stats.totalSnippets, color: 'purple' },
+                    { label: 'Errors (24h)', value: stats.recentErrors, color: stats.recentErrors > 0 ? 'red' : 'slate' },
+                ].map(s => `
+                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">${s.label}</p>
+                        <p class="text-2xl font-black text-white">${s.value}</p>
+                    </div>
+                `).join('')}
+            </div>
+
+            <!-- Per-server breakdown -->
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden mb-8">
+                <div class="p-5 border-b border-slate-800">
+                    <h2 class="text-sm font-black text-white uppercase tracking-tight">All Configured Servers</h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-900/60 border-b border-slate-800">
+                            <tr>
+                                ${['Server', 'Guild ID', 'Forum', 'Snippets', 'Threads Tracked', 'Pending Locks', 'Blocked Users'].map(h =>
+                                    `<th class="p-4 text-[9px] font-black uppercase text-slate-500 tracking-widest">${h}</th>`
+                                ).join('')}
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/40">
+                            ${allGuilds.map(g => {
+                                const guild = client.guilds.cache.get(g.guild_id);
+                                const snippets = db.prepare("SELECT COUNT(*) as c FROM snippets WHERE guild_id = ?").get(g.guild_id).c;
+                                const threads = db.prepare("SELECT COUNT(*) as c FROM thread_tracking WHERE guild_id = ?").get(g.guild_id).c;
+                                const locks = db.prepare("SELECT COUNT(*) as c FROM pending_locks WHERE guild_id = ?").get(g.guild_id).c;
+                                const blocked = db.prepare("SELECT COUNT(*) as c FROM blocked_users WHERE guild_id = ?").get(g.guild_id).c;
+                                return `
+                                <tr class="hover:bg-white/5 transition">
+                                    <td class="p-4 text-sm font-bold text-white">${g.guild_name}</td>
+                                    <td class="p-4 text-[10px] mono text-slate-500">${g.guild_id}</td>
+                                    <td class="p-4 text-[10px] mono text-slate-500">${g.forum_id}</td>
+                                    <td class="p-4 text-sm text-slate-300">${snippets}</td>
+                                    <td class="p-4 text-sm text-slate-300">${threads}</td>
+                                    <td class="p-4 text-sm ${locks > 0 ? 'text-emerald-400' : 'text-slate-500'}">${locks}</td>
+                                    <td class="p-4 text-sm ${blocked > 0 ? 'text-red-400' : 'text-slate-500'}">${blocked}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent logs -->
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
+                <div class="p-5 border-b border-slate-800 flex justify-between items-center">
+                    <h2 class="text-sm font-black text-white uppercase tracking-tight">Recent Activity (Global)</h2>
+                    <a href="/admin/errors" class="text-red-400 text-[9px] font-black uppercase tracking-widest hover:underline">Errors Only →</a>
+                </div>
+                <div class="divide-y divide-slate-800/40">
+                    ${recentLogs.map(l => `
+                        <div class="p-4 hover:bg-white/5 transition flex items-center gap-4">
+                            <span class="px-2 py-0.5 rounded text-[8px] font-black ${getActionColor(l.action)} border shrink-0">${l.action}</span>
+                            <p class="text-xs text-slate-400 flex-1 truncate">${l.details}</p>
+                            <span class="text-[9px] text-slate-600 mono shrink-0">${new Date(l.timestamp).toLocaleString()}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+        </body></html>
+    `);
+});
+
+// ADMIN USERS PAGE
+app.get('/admin/users', requireAdmin, (req, res) => {
+    const blockedUsers = db.prepare("SELECT bu.*, gs.guild_name FROM blocked_users bu LEFT JOIN guild_settings gs ON bu.guild_id = gs.guild_id ORDER BY bu.blocked_at DESC").all();
+    const bannedUsers = db.prepare("SELECT * FROM banned_users ORDER BY banned_at DESC").all();
+    const suspendedUsers = db.prepare("SELECT su.*, gs.guild_name FROM suspended_users su LEFT JOIN guild_settings gs ON su.guild_id = gs.guild_id WHERE su.expires_at > ? ORDER BY su.suspended_at DESC").all(Date.now());
+
+    res.send(`
+        <html>
+        ${getHead("Impulse Admin | Users")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            ${getAdminNav('users')}
+
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">User <span class="text-red-400">Management</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Global view of all restricted users</p>
+            </div>
+
+            <!-- Banned Users -->
+            <div class="bg-slate-900/40 border border-red-900/30 rounded-2xl overflow-hidden mb-6">
+                <div class="p-5 border-b border-red-900/30 bg-red-900/10">
+                    <h2 class="text-sm font-black text-red-400 uppercase tracking-tight">🔨 Globally Banned (${bannedUsers.length})</h2>
+                </div>
+                ${bannedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No globally banned users</p>' : `
+                <div class="divide-y divide-slate-800/40">
+                    ${bannedUsers.map(u => `
+                        <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
+                            <div>
+                                <p class="text-sm font-bold text-white mono">${u.user_id}</p>
+                                <p class="text-[10px] text-slate-500">${u.reason || 'No reason given'} • Banned by ${u.banned_by}</p>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-[9px] text-slate-600 mono">${new Date(u.banned_at).toLocaleDateString()}</span>
+                                <a href="/admin/unban/${u.user_id}" onclick="return confirm('Unban this user globally?')" 
+                                   class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Unban</a>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>`}
+            </div>
+
+            <!-- Blocked Users -->
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden mb-6">
+                <div class="p-5 border-b border-slate-800">
+                    <h2 class="text-sm font-black text-orange-400 uppercase tracking-tight">🚫 Server Blocked (${blockedUsers.length})</h2>
+                </div>
+                ${blockedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No blocked users</p>' : `
+                <div class="divide-y divide-slate-800/40">
+                    ${blockedUsers.map(u => `
+                        <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
+                            <div>
+                                <p class="text-sm font-bold text-white mono">${u.user_id}</p>
+                                <p class="text-[10px] text-slate-500">${u.guild_name || u.guild_id} • ${u.reason || 'No reason'}</p>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-[9px] text-slate-600 mono">${new Date(u.blocked_at).toLocaleDateString()}</span>
+                                <a href="/admin/unblock/${u.guild_id}/${u.user_id}" onclick="return confirm('Unblock this user?')"
+                                   class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Unblock</a>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>`}
+            </div>
+
+            <!-- Suspended Users -->
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
+                <div class="p-5 border-b border-slate-800">
+                    <h2 class="text-sm font-black text-yellow-400 uppercase tracking-tight">⏸ Auto-Suspended (${suspendedUsers.length})</h2>
+                </div>
+                ${suspendedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No active suspensions</p>' : `
+                <div class="divide-y divide-slate-800/40">
+                    ${suspendedUsers.map(u => `
+                        <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
+                            <div>
+                                <p class="text-sm font-bold text-white mono">${u.user_id}</p>
+                                <p class="text-[10px] text-slate-500">${u.guild_name || u.guild_id} • ${u.reason}</p>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-[9px] text-yellow-500 font-bold">Expires <span data-expire="${u.expires_at}">...</span></span>
+                                <a href="/admin/unsuspend/${u.guild_id}/${u.user_id}" onclick="return confirm('Lift this suspension?')"
+                                   class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Lift</a>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>`}
+            </div>
+        </div>
+        <script>
+            document.querySelectorAll('[data-expire]').forEach(el => {
+                const diff = parseInt(el.getAttribute('data-expire')) - Date.now();
+                const m = Math.floor(diff / 60000);
+                el.innerText = m + 'm';
+            });
+        </script>
+        </body></html>
+    `);
+});
+
+// ADMIN ERRORS PAGE
+app.get('/admin/errors', requireAdmin, (req, res) => {
+    const errors = db.prepare("SELECT * FROM audit_logs WHERE action IN ('ERROR', 'AUTO_SUSPEND', 'AUTO_CLOSE') ORDER BY timestamp DESC LIMIT 100").all();
+
+    res.send(`
+        <html>
+        ${getHead("Impulse Admin | Errors")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            ${getAdminNav('errors')}
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Error <span class="text-red-400">Monitor</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Auto-suspensions, errors, and automated actions</p>
+            </div>
+
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
+                ${errors.length === 0 ? '<p class="text-center text-slate-600 py-16 text-sm italic">No errors or automated events logged. All clear!</p>' : `
+                <div class="divide-y divide-slate-800/40">
+                    ${errors.map(e => `
+                        <div class="p-4 hover:bg-white/5 transition flex items-start gap-4">
+                            <span class="px-2 py-0.5 rounded text-[8px] font-black ${getActionColor(e.action)} border shrink-0 mt-0.5">${e.action}</span>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-xs text-slate-300 font-medium">${e.details}</p>
+                                ${e.user_name ? `<p class="text-[10px] text-slate-600 mt-0.5">User: ${e.user_name} (${e.user_id})</p>` : ''}
+                            </div>
+                            <span class="text-[9px] text-slate-600 mono shrink-0">${new Date(e.timestamp).toLocaleString()}</span>
+                        </div>
+                    `).join('')}
+                </div>`}
+            </div>
+        </div>
+        </body></html>
+    `);
+});
+
+// ADMIN DATABASE PAGE
+app.get('/admin/database', requireAdmin, (req, res) => {
+    const tables = ['guild_settings', 'thread_tracking', 'pending_locks', 'audit_logs', 'snippets', 'thread_links', 'reaction_triggers', 'blocked_users', 'banned_users', 'suspended_users', 'command_cooldowns'];
+    const tableCounts = tables.map(t => ({
+        name: t,
+        count: db.prepare(`SELECT COUNT(*) as c FROM ${t}`).get().c
+    }));
+    const dbSize = (() => { try { return require('fs').statSync('database.db').size; } catch(e) { return 0; } })();
+
+    res.send(`
+        <html>
+        ${getHead("Impulse Admin | Database")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            ${getAdminNav('database')}
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Database <span class="text-red-400">Inspector</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Table row counts • DB size • Health check</p>
+            </div>
+
+            <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-5 mb-6 flex items-center justify-between">
+                <div>
+                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Database File Size</p>
+                    <p class="text-2xl font-black text-white">${(dbSize / 1024).toFixed(1)} <span class="text-sm text-slate-500">KB</span></p>
+                </div>
+                <div>
+                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Tables</p>
+                    <p class="text-2xl font-black text-white">${tables.length}</p>
+                </div>
+                <div>
+                    <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Rows</p>
+                    <p class="text-2xl font-black text-white">${tableCounts.reduce((a, t) => a + t.count, 0).toLocaleString()}</p>
+                </div>
+                <a href="/admin/database/vacuum" onclick="return confirm('Run VACUUM? This will optimize the database.')"
+                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition">
+                    Run VACUUM
+                </a>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                ${tableCounts.map(t => `
+                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 mono">${t.name}</p>
+                        <p class="text-3xl font-black text-white">${t.count.toLocaleString()}</p>
+                        <p class="text-[9px] text-slate-600 uppercase font-bold mt-1">rows</p>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        </body></html>
+    `);
+});
+
+app.get('/admin/database/vacuum', requireAdmin, (req, res) => {
+    db.prepare("VACUUM").run();
+    res.redirect('/admin/database');
+});
+
+// ADMIN SYSTEM PAGE
+app.get('/admin/system', requireAdmin, (req, res) => {
+    const memUsage = process.memoryUsage();
+    const uptimeSeconds = process.uptime();
+    const d = Math.floor(uptimeSeconds / 86400);
+    const h = Math.floor((uptimeSeconds % 86400) / 3600);
+    const m = Math.floor((uptimeSeconds % 3600) / 60);
+    const s = Math.floor(uptimeSeconds % 60);
+    const uptimeStr = `${d}d ${h}h ${m}m ${s}s`;
+
+    res.send(`
+        <html>
+        ${getHead("Impulse Admin | System")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            ${getAdminNav('system')}
+            <div class="mb-8">
+                <h1 class="text-3xl font-black text-white uppercase tracking-tighter">System <span class="text-red-400">Monitor</span></h1>
+                <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Process health • Memory • Runtime info</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Process Info</h3>
+                    ${[
+                        ['Uptime', uptimeStr],
+                        ['Node.js Version', process.version],
+                        ['Platform', process.platform],
+                        ['PID', process.pid],
+                        ['Discord.js', require('./node_modules/discord.js/package.json').version],
+                    ].map(([k, v]) => `
+                        <div class="flex justify-between items-center py-2 border-b border-slate-800/50">
+                            <span class="text-[10px] font-black text-slate-500 uppercase tracking-widest">${k}</span>
+                            <span class="text-xs font-bold text-white mono">${v}</span>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Memory Usage</h3>
+                    ${[
+                        ['Heap Used', (memUsage.heapUsed / 1024 / 1024).toFixed(2) + ' MB'],
+                        ['Heap Total', (memUsage.heapTotal / 1024 / 1024).toFixed(2) + ' MB'],
+                        ['RSS', (memUsage.rss / 1024 / 1024).toFixed(2) + ' MB'],
+                        ['External', (memUsage.external / 1024 / 1024).toFixed(2) + ' MB'],
+                    ].map(([k, v]) => `
+                        <div class="flex justify-between items-center py-2 border-b border-slate-800/50">
+                            <span class="text-[10px] font-black text-slate-500 uppercase tracking-widest">${k}</span>
+                            <span class="text-xs font-bold text-[#FFAA00] mono">${v}</span>
+                        </div>
+                    `).join('')}
+
+                    <div class="pt-2">
+                        <p class="text-[9px] text-slate-600 uppercase font-bold tracking-widest mb-2">Heap Usage</p>
+                        <div class="w-full bg-slate-800 rounded-full h-2">
+                            <div class="bg-[#FFAA00] h-2 rounded-full transition-all" style="width: ${Math.min(100, (memUsage.heapUsed / memUsage.heapTotal * 100)).toFixed(1)}%"></div>
+                        </div>
+                        <p class="text-[9px] text-slate-600 mt-1">${(memUsage.heapUsed / memUsage.heapTotal * 100).toFixed(1)}% used</p>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 md:col-span-2">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Discord Client</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        ${[
+                            ['Ping', client.ws.ping + 'ms'],
+                            ['Guilds', client.guilds.cache.size],
+                            ['Cached Users', client.users.cache.size],
+                            ['Cached Channels', client.channels.cache.size],
+                        ].map(([k, v]) => `
+                            <div class="bg-slate-800/50 rounded-xl p-4">
+                                <p class="text-2xl font-black text-white">${v}</p>
+                                <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider mt-1">${k}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>
+        </body></html>
+    `);
+});
+
+// ADMIN action routes
+app.get('/admin/unban/:userId', requireAdmin, (req, res) => {
+    db.prepare("DELETE FROM banned_users WHERE user_id = ?").run(req.params.userId);
+    res.redirect('/admin/users');
+});
+
+app.get('/admin/unblock/:guildId/:userId', requireAdmin, (req, res) => {
+    db.prepare("DELETE FROM blocked_users WHERE guild_id = ? AND user_id = ?").run(req.params.guildId, req.params.userId);
+    res.redirect('/admin/users');
+});
+
+app.get('/admin/unsuspend/:guildId/:userId', requireAdmin, (req, res) => {
+    db.prepare("DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?").run(req.params.guildId, req.params.userId);
+    res.redirect('/admin/users');
+});
+
 app.use((req, res) => {
   res
     .status(404)
@@ -2519,51 +3069,44 @@ client.once("clientReady", async (c) => {
   // ONE-TIME: Scan and track threads from the last 2 weeks
   console.log("📊 Scanning existing threads from the last 2 weeks...");
   const twoWeeksAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
-
   const allSettings = db.prepare("SELECT * FROM guild_settings").all();
+
   for (const settings of allSettings) {
     try {
       const guild = client.guilds.cache.get(settings.guild_id);
       if (!guild) continue;
 
-      const forumChannel = await guild.channels
-        .fetch(settings.forum_id)
-        .catch(() => null);
+      const forumChannel = await guild.channels.fetch(settings.forum_id).catch(() => null);
       if (!forumChannel || !forumChannel.isThreadOnly()) continue;
 
-      // Fetch all active threads
       const threads = await forumChannel.threads.fetchActive();
+      const toTrack = [];
 
       for (const [threadId, thread] of threads.threads) {
-        // Only track threads created in the last 2 weeks
-        if (thread.createdTimestamp && thread.createdTimestamp >= twoWeeksAgo) {
-          // Skip threads that already have the resolved tag
-          if (thread.appliedTags.includes(settings.resolved_tag)) {
-            console.log(`⏭️  Skipping resolved thread: ${thread.name}`);
-            continue;
-          }
-
-          // Check if already being tracked
-          const existing = db
-            .prepare("SELECT * FROM thread_tracking WHERE thread_id = ?")
-            .get(threadId);
-          if (!existing) {
-            db.prepare(
-              "INSERT INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)"
-            ).run(
-              threadId,
-              settings.guild_id,
-              thread.createdTimestamp || Date.now()
-            );
-            console.log(`✅ Now tracking thread: ${thread.name} (${threadId})`);
-          }
-        }
+        if (!thread.createdTimestamp || thread.createdTimestamp < twoWeeksAgo) continue;
+        if (thread.appliedTags.includes(settings.resolved_tag)) continue;
+        const existing = db.prepare("SELECT 1 FROM thread_tracking WHERE thread_id = ?").get(threadId);
+        if (!existing) toTrack.push({ threadId, thread });
       }
+
+      console.log(`📋 ${guild.name}: ${toTrack.length} new threads to register`);
+
+      // Insert in batches of 50 with a small delay between batches
+      for (let i = 0; i < toTrack.length; i += 50) {
+        const batch = toTrack.slice(i, i + 50);
+        const insert = db.prepare("INSERT INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)");
+        const insertMany = db.transaction((items) => {
+          for (const { threadId, thread } of items) {
+            insert.run(threadId, settings.guild_id, thread.createdTimestamp || Date.now());
+          }
+        });
+        insertMany(batch);
+        if (i + 50 < toTrack.length) await sleep(500);
+      }
+
+      console.log(`✅ ${guild.name}: registered ${toTrack.length} threads`);
     } catch (error) {
-      console.error(
-        `Error scanning threads for guild ${settings.guild_id}:`,
-        error
-      );
+      console.error(`Error scanning guild ${settings.guild_id}:`, error);
     }
   }
   console.log("✅ Initial thread scan complete!");
