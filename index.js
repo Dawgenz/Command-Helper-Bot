@@ -228,13 +228,22 @@ try {
     db.prepare(`ALTER TABLE guild_settings ADD COLUMN audit_channel_id TEXT`).run();
 } catch (e) { /* exists */ }
 
+try {
+    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN escalation_sent INTEGER DEFAULT 0`).run();
+} catch (e) { /* exists */ }
+
+try {
+    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN first_response_at INTEGER`).run();
+    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN first_responder_id TEXT`).run();
+} catch (e) { /* exists */ }
+
 // --- HELPERS ---
 const getSettings = (guildId) =>
   db.prepare("SELECT * FROM guild_settings WHERE guild_id = ?").get(guildId);
 
 function getNav(activePage, user) {
   const current = activePage === "home" ? "overview" : activePage;
-  const pages = ["overview", "snippets", "threads", "fun", "logs"];
+  const pages = ["overview", "snippets", "threads", "fun", "logs", "metrics"];
   const isAdmin = user && user.id === process.env.ADMIN_DISCORD_ID;
 
   const profileSection = user
@@ -708,6 +717,7 @@ const getActionColor = (action) => {
     AUTO_SUSPEND: "bg-orange-500/10 text-orange-400 border-orange-500/20",
     BULK_CLOSE: "bg-slate-500/10 text-slate-300 border-slate-500/20",
     MANUAL_SUSPEND: "bg-orange-600/10 text-orange-300 border-orange-600/20",
+    ESCALATION: "bg-red-500/10 text-red-400 border-red-500/20",
   };
   return colors[action] || "bg-slate-800 text-slate-400 border-slate-700";
 };
@@ -1191,6 +1201,7 @@ app.get("/logs", async (req, res) => {
     "USER_UNBANNED",
     "AUTO_SUSPEND",
     "BULK_CLOSE",
+    "ESCALATION",
   ];
 
   const managedGuilds = managedGuildIds.map((id) => {
@@ -2174,20 +2185,25 @@ app.get("/snippets/new", (req, res) => {
             // Simulated variable replacement for the dashboard preview
             function simulateVars(text) {
                 if (!text) return "";
-                let p = text
-                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") // Escape HTML
-                    .replace(/{user}/g, '<span class="text-[#5865F2] hover:underline cursor-pointer">@${
-                      req.user.username
-                    }</span>')
-                    .replace(/{server}/g, '<strong>Impulse OS</strong>')
-                    .replace(/{channel}/g, '<span class="text-[#5865F2] hover:underline cursor-pointer">#general</span>')
+                return text
+                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                    .replace(/{user}/g, '<span class="text-[#5865F2] font-medium">@${sanitize(req.user.username)}</span>')
+                    .replace(/{username}/g, '<span class="text-[#5865F2] font-medium">${sanitize(req.user.username)}</span>')
+                    .replace(/{server}/g, '<strong>This Server</strong>')
+                    .replace(/{channel}/g, '<span class="text-[#5865F2] font-medium">#this-channel</span>')
+                    .replace(/{thread_author}/g, '<span class="text-[#5865F2] font-medium">@ThreadAuthor</span>')
+                    .replace(/{thread_link}/g, '<a href="#" class="text-[#00a8fc] hover:underline">Thread Link</a>')
+                    .replace(/{current_time}/g, '<span class="text-slate-300">12:00 PM UTC</span>')
+                    .replace(/{current_date}/g, '<span class="text-slate-300">Jan 1, 2026</span>')
+                    .replace(/{member_count}/g, '<span class="text-slate-300">1,234</span>')
                     .replace(/{br}/g, '<br>')
-                    // Discord Markdown Simulation
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
-                    .replace(/\*(.*?)\*/g, '<em>$1</em>') // Italics
-                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="#" class="text-[#00a8fc] hover:underline">$1</a>'); // Links
-
-                return p;
+                    .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                    .replace(/__(.*?)__/g, '<u>$1</u>')
+                    .replace(/~~(.*?)~~/g, '<s>$1</s>')
+                    .replace(/\`([^\`]+)\`/g, '<code class="bg-black/30 px-1 rounded text-[#f47067] text-xs font-mono">$1</code>')
+                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="#" class="text-[#00a8fc] hover:underline">$1</a>');
             }
 
             function updatePreview() {
@@ -2201,7 +2217,7 @@ app.get("/snippets/new", (req, res) => {
 
                 // Use innerHTML for description so our simulated variable spans work
                 preview.desc.innerHTML = simulateVars(inputs.desc.value);
-                preview.footer.innerText = simulateVars(inputs.footer.value);
+                preview.footer.innerHTML = simulateVars(inputs.footer.value);
                 
                 preview.border.style.borderColor = inputs.color.value;
                 preview.hex.innerText = inputs.color.value.toUpperCase();
@@ -2434,37 +2450,64 @@ app.get("/snippets/edit/:id", async (req, res) => {
         </div>
 
         <script>
-            // Reuse your updatePreview script here to keep the experience consistent!
-            const inputs = {
-                title: document.getElementById('inTitle'),
-                desc: document.getElementById('inDesc'),
-                footer: document.getElementById('inFooter'),
-                url: document.getElementById('inUrl'),
-                image: document.getElementById('inImage'),
-                thumb: document.getElementById('inThumb')
-            };
+    const inputs = {
+        title: document.getElementById('inTitle'),
+        desc: document.getElementById('inDesc'),
+        footer: document.getElementById('inFooter'),
+        url: document.getElementById('inUrl'),
+        image: document.getElementById('inImage'),
+        thumb: document.getElementById('inThumb')
+    };
+    const preview = {
+        title: document.getElementById('preTitle'),
+        desc: document.getElementById('preDesc'),
+        footer: document.getElementById('preFooter'),
+        border: document.getElementById('preBorder'),
+        image: document.getElementById('preImage'),
+        thumb: document.getElementById('preThumb')
+    };
 
-            const preview = {
-                title: document.getElementById('preTitle'),
-                desc: document.getElementById('preDesc'),
-                footer: document.getElementById('preFooter'),
-                image: document.getElementById('preImage'),
-                thumb: document.getElementById('preThumb')
-            };
+    function simulateVars(text) {
+        if (!text) return "";
+        return text
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/{user}/g, '<span class="text-[#5865F2] font-medium">@You</span>')
+            .replace(/{username}/g, '<span class="text-[#5865F2] font-medium">you</span>')
+            .replace(/{server}/g, '<strong>This Server</strong>')
+            .replace(/{channel}/g, '<span class="text-[#5865F2] font-medium">#this-channel</span>')
+            .replace(/{thread_author}/g, '<span class="text-[#5865F2] font-medium">@ThreadAuthor</span>')
+            .replace(/{thread_link}/g, '<a href="#" class="text-[#00a8fc] hover:underline">Thread Link</a>')
+            .replace(/{current_time}/g, '<span class="text-slate-300">12:00 PM UTC</span>')
+            .replace(/{current_date}/g, '<span class="text-slate-300">Jan 1, 2026</span>')
+            .replace(/{member_count}/g, '<span class="text-slate-300">1,234</span>')
+            .replace(/{br}/g, '<br>')
+            .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/__(.*?)__/g, '<u>$1</u>')
+            .replace(/~~(.*?)~~/g, '<s>$1</s>')
+            .replace(/\`([^\`]+)\`/g, '<code class="bg-black/30 px-1 rounded text-[#f47067] text-xs font-mono">$1</code>')
+            .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="#" class="text-[#00a8fc] hover:underline">$1</a>');
+    }
 
-            function update() {
-                preview.title.innerText = inputs.title.value;
-                preview.desc.innerText = inputs.desc.value;
-                preview.footer.innerText = inputs.footer.value;
-                preview.image.src = inputs.image.value;
-                preview.image.style.display = inputs.image.value ? 'block' : 'none';
-                preview.thumb.src = inputs.thumb.value;
-                preview.thumb.style.display = inputs.thumb.value ? 'block' : 'none';
-            }
-
-            Object.values(inputs).forEach(i => i.addEventListener('input', update));
-            update();
-        </script>
+    function update() {
+        const rawTitle = inputs.title.value;
+        if (inputs.url && inputs.url.value) {
+            // Note the escaped backticks below
+            preview.title.innerHTML = \`<a href="#" class="text-[#00a8fc] hover:underline">\${simulateVars(rawTitle) || 'Untitled Link'}</a>\`;
+        } else {
+            preview.title.innerHTML = simulateVars(rawTitle);
+        }
+        preview.desc.innerHTML = simulateVars(inputs.desc.value);
+        preview.footer.innerHTML = simulateVars(inputs.footer.value);
+        preview.image.src = inputs.image.value;
+        preview.image.style.display = inputs.image.value ? 'block' : 'none';
+        preview.thumb.src = inputs.thumb.value;
+        preview.thumb.style.display = inputs.thumb.value ? 'block' : 'none';
+    }
+    Object.values(inputs).forEach(i => i.addEventListener('input', update));
+    update();
+</script>
     </body>
     </html>
     `);
@@ -3165,6 +3208,193 @@ app.use((req, res) => {
     );
 });
 
+app.get("/metrics", async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+
+    const managedGuildIds = getManagedGuilds(req.user.id);
+    if (managedGuildIds.length === 0) return res.send(getErrorPage("No Access", "No managed servers found."));
+
+    const selectedGuildId = req.query.guild || managedGuildIds[0];
+    const guildNames = managedGuildIds.map(id => {
+        const g = client.guilds.cache.get(id);
+        return { id, name: g ? g.name : id };
+    });
+
+    // Response time stats
+    const responseTimes = db.prepare(`
+        SELECT first_response_at, created_at, first_responder_id
+        FROM thread_tracking 
+        WHERE guild_id = ? AND first_response_at IS NOT NULL
+    `).all(selectedGuildId);
+
+    const avgResponseMs = responseTimes.length > 0
+        ? responseTimes.reduce((a, t) => a + (t.first_response_at - t.created_at), 0) / responseTimes.length
+        : null;
+
+    const avgResponseDisplay = avgResponseMs === null ? 'No data yet'
+        : avgResponseMs < 3600000 ? `${Math.round(avgResponseMs / 60000)} minutes`
+        : avgResponseMs < 86400000 ? `${(avgResponseMs / 3600000).toFixed(1)} hours`
+        : `${(avgResponseMs / 86400000).toFixed(1)} days`;
+
+    // Top responders
+    const responderCounts = {};
+    for (const t of responseTimes) {
+        if (t.first_responder_id) {
+            responderCounts[t.first_responder_id] = (responderCounts[t.first_responder_id] || 0) + 1;
+        }
+    }
+    const topResponders = Object.entries(responderCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+    // Action counts for charts
+    const actionCounts = db.prepare(`
+        SELECT action, COUNT(*) as count 
+        FROM audit_logs 
+        WHERE guild_id = ?
+        GROUP BY action 
+        ORDER BY count DESC
+        LIMIT 12
+    `).all(selectedGuildId);
+
+    // Thread activity by day (last 30 days)
+    const dailyThreads = db.prepare(`
+        SELECT DATE(timestamp) as day, COUNT(*) as count
+        FROM audit_logs
+        WHERE guild_id = ? AND action = 'GREET'
+        AND timestamp >= datetime('now', '-30 days')
+        GROUP BY DATE(timestamp)
+        ORDER BY day ASC
+    `).all(selectedGuildId);
+
+    // Resolution stats
+    const totalResolved = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'RESOLVED'").get(selectedGuildId).c;
+    const totalAutoClose = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'AUTO_CLOSE'").get(selectedGuildId).c;
+    const totalGreets = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'GREET'").get(selectedGuildId).c;
+    const totalEscalations = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'ESCALATION'").get(selectedGuildId).c;
+    const totalSnippets = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'SNIPPET'").get(selectedGuildId).c;
+
+    const resolutionRate = totalGreets > 0 ? ((totalResolved / totalGreets) * 100).toFixed(1) : '0';
+
+    res.send(`
+        <html>
+        ${getHead("Impulse | Metrics")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            ${getNav("metrics", req.user)}
+
+            <div class="flex items-center justify-between mb-8">
+                <div>
+                    <h1 class="text-3xl font-black text-white uppercase tracking-tighter">
+                        Server <span class="text-[#FFAA00]">Metrics</span>
+                    </h1>
+                    <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Analytics • Response Times • Activity</p>
+                </div>
+                ${guildNames.length > 1 ? `
+                <select onchange="window.location='/metrics?guild='+this.value" 
+                    class="bg-slate-900 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg outline-none focus:border-[#FFAA00]">
+                    ${guildNames.map(g => `<option value="${g.id}" ${g.id === selectedGuildId ? 'selected' : ''}>${sanitize(g.name)}</option>`).join('')}
+                </select>` : ''}
+            </div>
+
+            <!-- Top Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+                ${[
+                    { label: 'Total Threads', value: totalGreets, sub: 'all time', color: 'amber' },
+                    { label: 'Resolved', value: totalResolved, sub: `${resolutionRate}% rate`, color: 'emerald' },
+                    { label: 'Auto-Closed', value: totalAutoClose, sub: 'inactivity', color: 'slate' },
+                    { label: 'Escalations', value: totalEscalations, sub: '24h+ unanswered', color: 'red' },
+                    { label: 'Snippet Uses', value: totalSnippets, sub: 'total', color: 'blue' },
+                ].map(s => `
+                    <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">${s.label}</p>
+                        <p class="text-3xl font-black text-white">${s.value.toLocaleString()}</p>
+                        <p class="text-[9px] text-slate-600 uppercase font-bold mt-1">${s.sub}</p>
+                    </div>
+                `).join('')}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Response Time -->
+                <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-5">Response Time</h3>
+                    <div class="text-center py-4">
+                        <p class="text-4xl font-black text-[#FFAA00] mb-2">${avgResponseDisplay}</p>
+                        <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Average first helper response</p>
+                        <p class="text-[9px] text-slate-600 mt-1">Based on ${responseTimes.length} threads with responses</p>
+                    </div>
+
+                    ${topResponders.length > 0 ? `
+                    <div class="mt-6 space-y-3">
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Top Responders</p>
+                        ${topResponders.map(([uid, count], i) => `
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-[9px] font-black text-slate-600 w-4">#${i + 1}</span>
+                                    <span class="text-xs text-slate-300"><@${uid}> <span class="text-slate-500 text-[10px]">(${uid})</span></span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <div class="h-1.5 bg-[#FFAA00] rounded-full" style="width: ${Math.round((count / topResponders[0][1]) * 80)}px"></div>
+                                    <span class="text-[10px] font-black text-[#FFAA00]">${count}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>` : ''}
+                </div>
+
+                <!-- Action Breakdown -->
+                <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-5">Action Breakdown</h3>
+                    <div class="space-y-3">
+                        ${actionCounts.map(a => {
+                            const maxCount = actionCounts[0].count;
+                            const pct = Math.round((a.count / maxCount) * 100);
+                            return `
+                            <div>
+                                <div class="flex justify-between mb-1">
+                                    <span class="text-[10px] font-black text-slate-400 uppercase">${a.action.replace(/_/g, ' ')}</span>
+                                    <span class="text-[10px] font-black text-white">${a.count.toLocaleString()}</span>
+                                </div>
+                                <div class="w-full bg-slate-800 rounded-full h-1.5">
+                                    <div class="bg-[#FFAA00] h-1.5 rounded-full transition-all" style="width: ${pct}%"></div>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Daily Thread Activity -->
+            <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6">
+                <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6">New Threads — Last 30 Days</h3>
+                ${dailyThreads.length === 0 ? `
+                    <p class="text-center text-slate-600 py-8 text-xs italic">No thread activity recorded yet in the last 30 days.</p>
+                ` : `
+                <div class="flex items-end gap-1 h-32">
+                    ${(() => {
+                        const maxVal = Math.max(...dailyThreads.map(d => d.count), 1);
+                        return dailyThreads.map(d => {
+                            const height = Math.max(4, Math.round((d.count / maxVal) * 100));
+                            return `
+                            <div class="flex-1 flex flex-col items-center gap-1 group relative">
+                                <div class="absolute bottom-full mb-1 bg-slate-800 text-white text-[9px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
+                                    ${d.day}: ${d.count} thread${d.count !== 1 ? 's' : ''}
+                                </div>
+                                <div class="w-full bg-[#FFAA00]/80 hover:bg-[#FFAA00] rounded-sm transition-all" style="height: ${height}%"></div>
+                            </div>`;
+                        }).join('');
+                    })()}
+                </div>
+                <div class="flex justify-between mt-2">
+                    <span class="text-[9px] text-slate-600">${dailyThreads[0]?.day || ''}</span>
+                    <span class="text-[9px] text-slate-600">${dailyThreads[dailyThreads.length - 1]?.day || ''}</span>
+                </div>`}
+            </div>
+        </div>
+        </body></html>
+    `);
+});
+
 app.get("/fun/delete/:id", async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect("/auth/discord");
 
@@ -3301,6 +3531,7 @@ async function checkStaleThreads() {
     const warningThreshold = Date.now() - 24 * 24 * 60 * 60 * 1000;
     const closeThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
+    // 1. WARNING PHASE
     const threadsNeedingWarning = db.prepare(`
         SELECT * FROM thread_tracking 
         WHERE created_at <= ? 
@@ -3339,6 +3570,50 @@ async function checkStaleThreads() {
         console.log(`⚠️  Warned: ${thread.name}`);
     }, 5, 1500);
 
+    const escalationThreshold = Date.now() - 24 * 60 * 60 * 1000;
+    const threadsNeedingEscalation = db.prepare(`
+        SELECT * FROM thread_tracking 
+        WHERE created_at <= ? 
+        AND escalation_sent = 0 
+        AND stale_warning_sent = 0
+        AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
+    `).all(escalationThreshold, escalationThreshold);
+
+    console.log(`🚨 ${threadsNeedingEscalation.length} threads need staff escalation`);
+
+    await processInChunks(threadsNeedingEscalation, async (tracked) => {
+        const settings = getSettings(tracked.guild_id);
+        if (!settings?.unanswered_tag || !settings?.helper_role_id) return;
+
+        const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
+        if (!thread || thread.locked || thread.archived) return;
+        if (!thread.appliedTags.includes(settings.unanswered_tag)) return;
+
+        if (settings.audit_channel_id) {
+            const auditChannel = await client.channels.fetch(settings.audit_channel_id).catch(() => null);
+            if (auditChannel) {
+                const helperRoles = settings.helper_role_id.split(',').map(id => `<@&${id.trim()}>`).join(' ');
+                const escalationEmbed = new EmbedBuilder()
+                    .setTitle('🚨 Unanswered Thread Alert')
+                    .setDescription(
+                        `A thread has gone unanswered for over 24 hours and needs attention.\n\n` +
+                        `**Thread:** [${thread.name}](https://discord.com/channels/${tracked.guild_id}/${thread.id})\n` +
+                        `**Opened:** <t:${Math.floor(tracked.created_at / 1000)}:R>\n` +
+                        `**Owner:** <@${thread.ownerId}>`
+                    )
+                    .setColor(0xef4444)
+                    .setTimestamp()
+                    .setFooter({ text: 'Impulse Bot • Escalation Alert' });
+
+                await auditChannel.send({ content: `${helperRoles} — unanswered thread needs attention!`, embeds: [escalationEmbed] });
+            }
+        }
+        db.prepare("UPDATE thread_tracking SET escalation_sent = 1 WHERE thread_id = ?").run(tracked.thread_id);
+        logAction(tracked.guild_id, "ESCALATION", `Escalated unanswered thread: ${thread.name}`);
+        console.log(`🚨 Escalated: ${thread.name}`);
+    }, 3, 1500);
+
+    // 3. AUTO-CLOSE PHASE
     const threadsToClose = db.prepare(`
         SELECT * FROM thread_tracking 
         WHERE created_at <= ?
@@ -3452,6 +3727,8 @@ client.on("messageCreate", async (message) => {
         (tag) => tag !== settings.unanswered_tag
       );
       await message.channel.setAppliedTags(newTags);
+      // Reset escalation so if thread goes unanswered again it can re-escalate
+      db.prepare("UPDATE thread_tracking SET escalation_sent = 0 WHERE thread_id = ?").run(message.channel.id);
       logAction(
         message.guildId,
         "ANSWERED",
@@ -3460,6 +3737,17 @@ client.on("messageCreate", async (message) => {
     }
   } catch (e) {
     console.error("Error removing unanswered tag:", e);
+  }
+
+  // Track first helper response time
+  if (message.author.id !== message.channel.ownerId) {
+    const tracked = db.prepare("SELECT * FROM thread_tracking WHERE thread_id = ?").get(message.channel.id);
+    if (tracked && !tracked.first_response_at) {
+        const responseTimeMs = Date.now() - tracked.created_at;
+        db.prepare("UPDATE thread_tracking SET first_response_at = ?, first_responder_id = ? WHERE thread_id = ?")
+            .run(Date.now(), message.author.id, message.channel.id);
+        console.log(`⏱️ First response in ${Math.round(responseTimeMs / 60000)}min for: ${message.channel.name}`);
+    }
   }
 
   // Reset stale warning if thread owner replies
