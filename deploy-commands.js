@@ -86,20 +86,40 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
         .addUserOption(option => option.setName('user').setDescription('User to unblock').setRequired(true)),
 
-    // BANUSER COMMAND
+    // SUSPEND COMMAND (server owners/admins)
     new SlashCommandBuilder()
-        .setName('banuser')
-        .setDescription('Ban a user from the bot entirely (all servers)')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addUserOption(option => option.setName('user').setDescription('User to ban').setRequired(true))
-        .addStringOption(option => option.setName('reason').setDescription('Reason for ban').setRequired(false)),
+        .setName('suspend')
+        .setDescription('Temporarily suspend a user from using bot commands in this server')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+        .addUserOption(option => option.setName('user').setDescription('User to suspend').setRequired(true))
+        .addStringOption(option =>
+            option.setName('duration')
+                .setDescription('How long to suspend (e.g. 1h, 30m, 7d, permanent)')
+                .setRequired(true))
+        .addStringOption(option => option.setName('reason').setDescription('Reason for suspension').setRequired(false)),
 
-    // UNBANUSER COMMAND
+    // UNSUSPEND COMMAND
     new SlashCommandBuilder()
-        .setName('unbanuser')
-        .setDescription('Unban a bot-banned user')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setName('unsuspend')
+        .setDescription('Lift a suspension from a user in this server')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+        .addUserOption(option => option.setName('user').setDescription('User to unsuspend').setRequired(true)),
+
+    // GLOBALBAN — only shown to you, hidden from everyone else via defaultMemberPermissions(0)
+    new SlashCommandBuilder()
+        .setName('globalban')
+        .setDescription('Globally blacklist a user from Impulse across all servers')
+        .setDefaultMemberPermissions('0')
+        .addUserOption(option => option.setName('user').setDescription('User to globally ban').setRequired(true))
+        .addStringOption(option => option.setName('reason').setDescription('Reason').setRequired(false)),
+
+    // GLOBALUNBAN
+    new SlashCommandBuilder()
+        .setName('globalunban')
+        .setDescription('Remove a global blacklist entry')
+        .setDefaultMemberPermissions('0')
         .addUserOption(option => option.setName('user').setDescription('User to unban').setRequired(true)),
+
     // REMOVELINK COMMAND (NEW!)
     new SlashCommandBuilder()
         .setName('removelink')

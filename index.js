@@ -478,6 +478,19 @@ function sanitize(str) {
         .replace(/'/g, '&#039;');
 }
 
+function parseDuration(str) {
+    if (!str) return null;
+    if (str.toLowerCase() === 'permanent') return null; // null = no expiry
+
+    const match = str.match(/^(\d+)(m|h|d|w)$/i);
+    if (!match) return undefined; // undefined = invalid format
+
+    const amount = parseInt(match[1]);
+    const unit = match[2].toLowerCase();
+    const multipliers = { m: 60000, h: 3600000, d: 86400000, w: 604800000 };
+    return Date.now() + amount * multipliers[unit];
+}
+
 function getErrorPage(title, message, code = "403") {
   return `
     <html>
@@ -694,6 +707,7 @@ const getActionColor = (action) => {
     USER_UNBANNED: "bg-teal-600/10 text-teal-300 border-teal-600/20",
     AUTO_SUSPEND: "bg-orange-500/10 text-orange-400 border-orange-500/20",
     BULK_CLOSE: "bg-slate-500/10 text-slate-300 border-slate-500/20",
+    MANUAL_SUSPEND: "bg-orange-600/10 text-orange-300 border-orange-600/20",
   };
   return colors[action] || "bg-slate-800 text-slate-400 border-slate-700";
 };
@@ -2882,7 +2896,7 @@ app.get('/admin/users', requireAdmin, (req, res) => {
                             </div>
                             <div class="flex items-center gap-3">
                                 <span class="text-[9px] text-slate-600 mono">${new Date(u.banned_at).toLocaleDateString()}</span>
-                                <a href="/admin/unban/${u.user_id}" onclick="return confirm('Unban this user globally?')" 
+                                <a href="/admin/globalunban/${u.user_id}" onclick="return confirm('Remove from global blacklist?')"
                                    class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Unban</a>
                             </div>
                         </div>
@@ -3124,7 +3138,7 @@ app.get('/admin/system', requireAdmin, (req, res) => {
 });
 
 // ADMIN action routes
-app.get('/admin/unban/:userId', requireAdmin, (req, res) => {
+app.get('/admin/globalunban/:userId', requireAdmin, (req, res) => {
     db.prepare("DELETE FROM banned_users WHERE user_id = ?").run(req.params.userId);
     res.redirect('/admin/users');
 });
@@ -3552,15 +3566,25 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
-  const settings = getSettings(interaction.guildId);
 
   const userId = interaction.user.id;
   const userName = interaction.user.username;
   const userAvatar = interaction.user.displayAvatarURL();
 
-  // Block/ban/suspend check — skip for admin commands
-  const adminCommands = ['setup', 'blockuser', 'unblockuser', 'banuser', 'unbanuser'];
-  if (!adminCommands.includes(interaction.commandName)) {
+  // GATE 1: Global blacklist check — runs before ANYTHING else
+  const globalBan = db.prepare("SELECT reason FROM banned_users WHERE user_id = ?").get(userId);
+  if (globalBan) {
+    return interaction.reply({
+      content: `🚫 You have been globally blacklisted from using Impulse Bot.${globalBan.reason ? ` Reason: ${globalBan.reason}` : ''}`,
+      ephemeral: true
+    });
+  }
+
+  const settings = getSettings(interaction.guildId);
+
+  // GATE 2: Server block/suspend check — skip for moderation commands themselves
+  const modCommands = ['setup', 'blockuser', 'unblockuser', 'suspend', 'unsuspend', 'globalban', 'globalunban'];
+  if (!modCommands.includes(interaction.commandName)) {
     const blockCheck = isUserBlocked(userId, interaction.guildId);
     if (blockCheck.blocked) {
       return interaction.reply({ content: `🚫 ${blockCheck.reason}`, ephemeral: true });
@@ -4154,23 +4178,127 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ embeds: [new EmbedBuilder().setTitle('✅ User Unblocked').setDescription(`**${target.username}** can now use bot commands again.`).setColor(0x10b981).setTimestamp()], ephemeral: true });
   }
 
-  if (interaction.commandName === 'banuser') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: '❌ Administrator only.', ephemeral: true });
+  if (interaction.commandName === 'globalban') {
+    if (userId !== process.env.ADMIN_DISCORD_ID) {
+        return interaction.reply({ content: '❌ This command is restricted to the bot owner.', ephemeral: true });
+    }
     const target = interaction.options.getUser('user');
     const reason = interaction.options.getString('reason') || null;
 
-    db.prepare("INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)").run(target.id, reason, userId, Date.now());
-    logAction(interaction.guildId, "USER_BANNED", `${target.username} globally banned${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/banuser`, null, null);
-    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🔨 User Globally Banned').setDescription(`**${target.username}** is banned from using this bot in all servers.${reason ? `\n**Reason:** ${reason}` : ''}`).setColor(0x7f1d1d).setTimestamp()], ephemeral: true });
+    if (target.id === process.env.ADMIN_DISCORD_ID) {
+        return interaction.reply({ content: '❌ Cannot blacklist yourself.', ephemeral: true });
+    }
+
+    db.prepare("INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)").run(
+        target.id, reason, userId, Date.now()
+    );
+    logAction(interaction.guildId, "USER_BANNED", `${target.username} globally blacklisted${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/globalban`, null, null);
+    await logToDiscord(interaction.guildId, "USER_BANNED", `**${target.username}** (\`${target.id}\`) globally blacklisted by <@${userId}>${reason ? `\nReason: ${reason}` : ''}`, userId);
+    return interaction.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle('🔨 User Globally Blacklisted')
+            .setDescription(`**${target.username}** (\`${target.id}\`) is now blacklisted from Impulse across all servers.${reason ? `\n**Reason:** ${reason}` : ''}`)
+            .setColor(0x7f1d1d)
+            .setTimestamp()
+            .setFooter({ text: 'Impulse Bot • Global Blacklist' })],
+        ephemeral: true
+    });
   }
 
-  if (interaction.commandName === 'unbanuser') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: '❌ Administrator only.', ephemeral: true });
+  if (interaction.commandName === 'globalunban') {
+    if (userId !== process.env.ADMIN_DISCORD_ID) {
+        return interaction.reply({ content: '❌ This command is restricted to the bot owner.', ephemeral: true });
+    }
     const target = interaction.options.getUser('user');
+    const existing = db.prepare("SELECT 1 FROM banned_users WHERE user_id = ?").get(target.id);
+    if (!existing) {
+        return interaction.reply({ content: `❌ **${target.username}** is not globally blacklisted.`, ephemeral: true });
+    }
 
     db.prepare("DELETE FROM banned_users WHERE user_id = ?").run(target.id);
-    logAction(interaction.guildId, "USER_UNBANNED", `${target.username} globally unbanned`, userId, userName, userAvatar, `/unbanuser`, null, null);
-    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('✅ User Unbanned').setDescription(`**${target.username}** can now use this bot again.`).setColor(0x10b981).setTimestamp()], ephemeral: true });
+    logAction(interaction.guildId, "USER_UNBANNED", `${target.username} removed from global blacklist`, userId, userName, userAvatar, `/globalunban`, null, null);
+    return interaction.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle('✅ Global Blacklist Removed')
+            .setDescription(`**${target.username}** can now use Impulse Bot again.`)
+            .setColor(0x10b981)
+            .setTimestamp()],
+        ephemeral: true
+    });
+  }
+
+  if (interaction.commandName === 'suspend') {
+    const isGuildAdmin = interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
+    const isHelper = hasHelperRole(interaction.member, settings);
+    if (!isGuildAdmin && !isHelper) {
+        return interaction.reply({ content: '❌ Manage Server permission required.', ephemeral: true });
+    }
+
+    const target = interaction.options.getUser('user');
+    const durationStr = interaction.options.getString('duration');
+    const reason = interaction.options.getString('reason') || null;
+
+    if (target.id === userId) {
+        return interaction.reply({ content: '❌ You cannot suspend yourself.', ephemeral: true });
+    }
+    if (target.id === process.env.ADMIN_DISCORD_ID) {
+        return interaction.reply({ content: '❌ Cannot suspend the bot owner.', ephemeral: true });
+    }
+
+    const expiresAt = parseDuration(durationStr);
+    if (expiresAt === undefined) {
+        return interaction.reply({
+            content: '❌ Invalid duration format. Use `30m`, `2h`, `7d`, `1w`, or `permanent`.',
+            ephemeral: true
+        });
+    }
+
+    db.prepare("INSERT OR REPLACE INTO suspended_users (guild_id, user_id, reason, suspended_at, expires_at) VALUES (?, ?, ?, ?, ?)").run(
+        interaction.guildId, target.id, reason, Date.now(), expiresAt
+    );
+
+    const durationDisplay = expiresAt
+        ? `until <t:${Math.floor(expiresAt / 1000)}:F> (<t:${Math.floor(expiresAt / 1000)}:R>)`
+        : '**permanently**';
+
+    logAction(interaction.guildId, "AUTO_SUSPEND", `${target.username} manually suspended${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/suspend`, null, null);
+    await logToDiscord(interaction.guildId, "AUTO_SUSPEND", `**${target.username}** suspended by <@${userId}> ${durationDisplay}${reason ? `\nReason: ${reason}` : ''}`, userId);
+
+    return interaction.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle('⏸ User Suspended')
+            .setDescription(`**${target.username}** has been suspended from using bot commands ${durationDisplay}.${reason ? `\n**Reason:** ${reason}` : ''}`)
+            .setColor(0xf97316)
+            .setTimestamp()
+            .setFooter({ text: 'Impulse Bot • Server Suspension' })],
+        ephemeral: true
+    });
+  }
+
+  if (interaction.commandName === 'unsuspend') {
+    const isGuildAdmin = interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
+    const isHelper = hasHelperRole(interaction.member, settings);
+    if (!isGuildAdmin && !isHelper) {
+        return interaction.reply({ content: '❌ Manage Server permission required.', ephemeral: true });
+    }
+
+    const target = interaction.options.getUser('user');
+    const existing = db.prepare("SELECT 1 FROM suspended_users WHERE guild_id = ? AND user_id = ?").get(interaction.guildId, target.id);
+    if (!existing) {
+        return interaction.reply({ content: `❌ **${target.username}** is not suspended in this server.`, ephemeral: true });
+    }
+
+    db.prepare("DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?").run(interaction.guildId, target.id);
+    logAction(interaction.guildId, "USER_UNBLOCKED", `${target.username} suspension lifted`, userId, userName, userAvatar, `/unsuspend`, null, null);
+
+    return interaction.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle('✅ Suspension Lifted')
+            .setDescription(`**${target.username}** can now use bot commands again in this server.`)
+            .setColor(0x10b981)
+            .setTimestamp()],
+        ephemeral: true
+    });
   }
 
   if (interaction.commandName === 'closethreads') {
