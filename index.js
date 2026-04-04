@@ -224,6 +224,10 @@ try {
   /* Columns exist */
 }
 
+try {
+    db.prepare(`ALTER TABLE guild_settings ADD COLUMN audit_channel_id TEXT`).run();
+} catch (e) { /* exists */ }
+
 // --- HELPERS ---
 const getSettings = (guildId) =>
   db.prepare("SELECT * FROM guild_settings WHERE guild_id = ?").get(guildId);
@@ -237,7 +241,7 @@ function getNav(activePage, user) {
     ? `
         <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 shadow-xl">
             <div class="text-right hidden sm:block">
-                <p class="text-[10px] font-black text-white uppercase leading-none">${user.username}</p>
+                <p class="text-[10px] font-black text-white uppercase leading-none">${sanitize(user.username)}</p>
                 <a href="/logout" class="text-[8px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Terminate Session</a>
             </div>
             <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" class="w-8 h-8 rounded-full border-2 border-[#FFAA00]">
@@ -339,6 +343,36 @@ const logAction = (
   );
 };
 
+async function logToDiscord(guildId, action, details, userId = null, color = 0xFFAA00) {
+    try {
+        const settings = getSettings(guildId);
+        if (!settings?.audit_channel_id) return;
+
+        const channel = await client.channels.fetch(settings.audit_channel_id).catch(() => null);
+        if (!channel) return;
+
+        const actionColors = {
+            LOCK: 0xf59e0b, AUTO_CLOSE: 0x6b7280, RESOLVED: 0x10b981,
+            DUPLICATE: 0x0ea5e9, SNIPPET_DELETE: 0xef4444, USER_BLOCKED: 0xef4444,
+            USER_BANNED: 0x7f1d1d, AUTO_SUSPEND: 0xf97316, BULK_CLOSE: 0x6b7280,
+            STALE_WARNING: 0xf59e0b, SNIPPET_CREATE: 0x3b82f6, SETUP: 0x10b981,
+        };
+
+        const embed = new EmbedBuilder()
+            .setTitle(`📋 ${action.replace(/_/g, ' ')}`)
+            .setDescription(details)
+            .setColor(actionColors[action] || color)
+            .setTimestamp()
+            .setFooter({ text: 'Impulse Bot • Audit Log' });
+
+        if (userId) embed.addFields({ name: 'User', value: `<@${userId}>`, inline: true });
+
+        await channel.send({ embeds: [embed] });
+    } catch (e) {
+        console.error('Discord audit log error:', e.message);
+    }
+}
+
 function hasHelperRole(member, settings) {
   if (!settings.helper_role_id) return false;
   const roleIDs = settings.helper_role_id.split(",").map((id) => id.trim());
@@ -401,18 +435,37 @@ function parseVars(text, interaction = null) {
   let processed = String(text);
 
   if (interaction) {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const memberCount = interaction.guild.memberCount ?? '?';
+
+    // Thread-specific vars — only available if in a thread
+    const isThread = interaction.channel?.isThread?.();
+    const threadAuthor = isThread && interaction.channel.ownerId
+        ? `<@${interaction.channel.ownerId}>`
+        : interaction.user.toString();
+    const threadLink = isThread
+        ? `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}`
+        : '';
+
     processed = processed
       .replace(/{user}/g, interaction.user.toString())
       .replace(/{username}/g, interaction.user.username)
       .replace(/{server}/g, interaction.guild.name)
-      .replace(/{channel}/g, interaction.channel.toString());
+      .replace(/{channel}/g, interaction.channel.toString())
+      .replace(/{thread_author}/g, threadAuthor)
+      .replace(/{thread_link}/g, threadLink)
+      .replace(/{current_time}/g, timeStr)
+      .replace(/{current_date}/g, dateStr)
+      .replace(/{member_count}/g, memberCount.toLocaleString());
   }
 
   processed = processed.replace(/{br}/g, "\n");
 
   return processed.length > 4000
     ? processed.substring(0, 4000) + "..."
-    : processed.replace(/{br}/g, "\n");
+    : processed;
 }
 
 function sanitize(str) {
@@ -503,9 +556,15 @@ app.use(
     secret: process.env.SESSION_SECRET || "keyboard cat",
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 },
+    cookie: { 
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    },
   })
 );
+
 app.use(passport.initialize());
 app.use(cookieParser());
 
@@ -815,7 +874,7 @@ app.get("/", async (req, res) => {
                         <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition shadow-lg">
                             <div class="flex items-center justify-between mb-4">
                                 <h3 class="text-[#FFAA00] uppercase text-[10px] font-black tracking-widest opacity-80 truncate flex-1">${
-                                  s.guild_name
+                                  sanitize(s.guild_name)
                                 }</h3>
                                 <span class="text-[8px] bg-slate-800 px-2 py-1 rounded text-slate-500 font-bold">${
                                   s.snippetCount
@@ -1998,6 +2057,10 @@ app.get("/snippets/new", (req, res) => {
                                     <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="The name of the Discord Server">{server}</span>
                                     <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="The current channel">{channel}</span>
                                     <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="Inserts a line break">{br}</span>
+                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="Mentions the thread's original poster">{thread_author}</span>
+                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="Direct link to this thread">{thread_link}</span>
+                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="Current time in UTC">{current_time}</span>
+                                    <span class="text-[8px] font-bold bg-slate-800 text-amber-500 px-2 py-0.5 rounded border border-amber-500/20 cursor-help" title="Total server member count">{member_count}</span>
                                 </div>
                             </div>
                             <textarea id="inDesc" name="description" placeholder="Hello {user}, welcome to {server}!" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-32 focus:border-[#FFAA00] outline-none resize-none"></textarea>
@@ -3184,6 +3247,7 @@ client.once("clientReady", async (c) => {
 
           await thread.send({ embeds: [lockEmbed] });
           logAction(row.guild_id, "LOCK", `Locked thread: ${thread.name}`);
+          await logToDiscord(row.guild_id, "LOCK", `Thread auto-locked: **${thread.name}**`);
         }
       } catch (e) {
         console.error("Lock error:", e);
@@ -3532,9 +3596,10 @@ client.on("interactionCreate", async (interaction) => {
     const unansTag = interaction.options.getString("unanswered_tag") || null;
     const rawRoles = interaction.options.getString("helper_roles");
     const cleanRoles = rawRoles.replace(/\s+/g, "");
+    const auditChannel = interaction.options.getChannel("audit_channel");
 
     db.prepare(
-      `INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, unanswered_tag, helper_role_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, unanswered_tag, helper_role_id, audit_channel_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       interaction.guildId,
       interaction.guild.name,
@@ -3542,7 +3607,8 @@ client.on("interactionCreate", async (interaction) => {
       resTag,
       dupTag,
       unansTag,
-      cleanRoles
+      cleanRoles,
+      auditChannel?.id || null
     );
 
     logAction(
@@ -3569,13 +3635,8 @@ client.on("interactionCreate", async (interaction) => {
             .join(" "),
           inline: true,
         },
-        {
-          name: "Tags Configured",
-          value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\`${
-            unansTag ? `\nUnanswered: \`${unansTag}\`` : ""
-          }`,
-          inline: false,
-        }
+        { name: "Tags Configured", value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\`${unansTag ? `\nUnanswered: \`${unansTag}\`` : ''}`, inline: false },
+        { name: "Audit Channel", value: auditChannel ? `<#${auditChannel.id}>` : 'Not configured', inline: true }
       )
       .setColor(IMPULSE_COLOR)
       .setTimestamp()
@@ -3673,6 +3734,9 @@ client.on("interactionCreate", async (interaction) => {
       interaction.channelId,
       reply.id
     );
+
+    await logToDiscord(interaction.guildId, "RESOLVED", `Thread marked resolved by <@${userId}>: **${interaction.channel.name}**`, userId);
+
   }
 
   if (interaction.commandName === "cancel") {
@@ -4074,6 +4138,7 @@ client.on("interactionCreate", async (interaction) => {
         interaction.guildId, target.id, reason, userId, Date.now()
     );
     logAction(interaction.guildId, "USER_BLOCKED", `${target.username} blocked${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/blockuser`, null, null);
+    await logToDiscord(interaction.guildId, "USER_BLOCKED", `**${target.username}** blocked by <@${userId}>${reason ? `\nReason: ${reason}` : ''}`, userId);
     return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🚫 User Blocked').setDescription(`**${target.username}** has been blocked from using bot commands in this server.${reason ? `\n**Reason:** ${reason}` : ''}`).setColor(0xef4444).setTimestamp()], ephemeral: true });
   }
 
@@ -4223,6 +4288,7 @@ client.on("interactionCreate", async (interaction) => {
                     `/closethreads days:${days} warn:${sendWarn}`,
                     thread.id, null
                 );
+                await logToDiscord(interaction.guildId, "BULK_CLOSE", `Bulk close executed by <@${userId}>: ${closed} threads closed (${days}d cutoff)`);
                 closed++;
             } catch (e) {
                 console.error(`Failed to close thread ${thread.name}:`, e.message);

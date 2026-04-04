@@ -130,6 +130,10 @@ const commands = [
         .addStringOption(option =>
             option.setName('unanswered_tag')
                 .setDescription('The ID of the Unanswered tag (optional)')
+                .setRequired(false))
+        .addChannelOption(option =>
+            option.setName('audit_channel')
+                .setDescription('Channel to mirror important bot actions (optional)')
                 .setRequired(false)),
 ].map(command => command.toJSON());
 
