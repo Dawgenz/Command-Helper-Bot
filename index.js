@@ -2187,8 +2187,8 @@ app.get("/snippets/new", (req, res) => {
                 if (!text) return "";
                 return text
                     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                    .replace(/{user}/g, '<span class="text-[#5865F2] font-medium">@${sanitize(req.user.username)}</span>')
-                    .replace(/{username}/g, '<span class="text-[#5865F2] font-medium">${sanitize(req.user.username)}</span>')
+                    .replace(/{user}/g, \`<span class="text-[#5865F2] font-medium">@${sanitize(req.user.username)}</span>\`)
+                    .replace(/{username}/g, \`<span class="text-[#5865F2] font-medium">${sanitize(req.user.username)}</span>\`)
                     .replace(/{server}/g, '<strong>This Server</strong>')
                     .replace(/{channel}/g, '<span class="text-[#5865F2] font-medium">#this-channel</span>')
                     .replace(/{thread_author}/g, '<span class="text-[#5865F2] font-medium">@ThreadAuthor</span>')
@@ -3196,18 +3196,6 @@ app.get('/admin/unsuspend/:guildId/:userId', requireAdmin, (req, res) => {
     res.redirect('/admin/users');
 });
 
-app.use((req, res) => {
-  res
-    .status(404)
-    .send(
-      getErrorPage(
-        "Page Not Found",
-        "The system module you requested does not exist or has been moved.",
-        "404"
-      )
-    );
-});
-
 app.get("/metrics", async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect("/auth/discord");
 
@@ -3390,9 +3378,69 @@ app.get("/metrics", async (req, res) => {
                     <span class="text-[9px] text-slate-600">${dailyThreads[dailyThreads.length - 1]?.day || ''}</span>
                 </div>`}
             </div>
+
+            <!-- Active Escalations -->
+            ${(() => {
+                const activeEscalations = db.prepare(`
+                    SELECT tt.thread_id, tt.guild_id, tt.created_at, tt.escalation_sent,
+                           al.details
+                    FROM thread_tracking tt
+                    LEFT JOIN (
+                        SELECT thread_id, details, MAX(timestamp) as latest
+                        FROM audit_logs WHERE action = 'ESCALATION'
+                        GROUP BY thread_id
+                    ) al ON al.thread_id = tt.thread_id
+                    WHERE tt.guild_id = ? AND tt.escalation_sent = 1
+                    ORDER BY tt.created_at ASC
+                    LIMIT 20
+                `).all(selectedGuildId);
+
+                if (activeEscalations.length === 0) return '';
+
+                return `
+                <div class="bg-slate-900/40 border border-red-900/30 rounded-2xl overflow-hidden mt-6">
+                    <div class="p-5 border-b border-red-900/30 bg-red-900/10 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                            <h3 class="text-sm font-black text-red-400 uppercase tracking-tight">
+                                Needs Attention — ${activeEscalations.length} Unanswered Thread${activeEscalations.length !== 1 ? 's' : ''} (24h+)
+                            </h3>
+                        </div>
+                        <span class="text-[9px] text-red-500 font-bold uppercase tracking-widest">No helpers have responded</span>
+                    </div>
+                    <div class="divide-y divide-slate-800/40">
+                        ${activeEscalations.map(e => `
+                            <div class="p-4 hover:bg-red-900/5 transition flex items-center justify-between gap-4">
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-bold text-slate-200 truncate">${sanitize(e.details?.split('|')[0]?.replace('Unanswered 24h+: ', '') || 'Unknown thread')}</p>
+                                    <p class="text-[10px] text-slate-500 mt-0.5">Opened <t:${Math.floor(e.created_at / 1000)}:R> • <t:${Math.floor(e.created_at / 1000)}:D></p>
+                                </div>
+                                <a href="https://discord.com/channels/${selectedGuildId}/${e.thread_id}" 
+                                   target="_blank"
+                                   class="shrink-0 text-[9px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 border border-red-900/40 hover:border-red-500/40 px-3 py-1.5 rounded-lg transition">
+                                    View Thread →
+                                </a>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            })()}
+
         </div>
         </body></html>
     `);
+});
+
+app.use((req, res) => {
+  res
+    .status(404)
+    .send(
+      getErrorPage(
+        "Page Not Found",
+        "The system module you requested does not exist or has been moved.",
+        "404"
+      )
+    );
 });
 
 app.get("/fun/delete/:id", async (req, res) => {
@@ -3583,34 +3631,22 @@ async function checkStaleThreads() {
 
     await processInChunks(threadsNeedingEscalation, async (tracked) => {
         const settings = getSettings(tracked.guild_id);
-        if (!settings?.unanswered_tag || !settings?.helper_role_id) return;
+        if (!settings?.unanswered_tag) return;
 
         const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
         if (!thread || thread.locked || thread.archived) return;
         if (!thread.appliedTags.includes(settings.unanswered_tag)) return;
 
-        if (settings.audit_channel_id) {
-            const auditChannel = await client.channels.fetch(settings.audit_channel_id).catch(() => null);
-            if (auditChannel) {
-                const helperRoles = settings.helper_role_id.split(',').map(id => `<@&${id.trim()}>`).join(' ');
-                const escalationEmbed = new EmbedBuilder()
-                    .setTitle('🚨 Unanswered Thread Alert')
-                    .setDescription(
-                        `A thread has gone unanswered for over 24 hours and needs attention.\n\n` +
-                        `**Thread:** [${thread.name}](https://discord.com/channels/${tracked.guild_id}/${thread.id})\n` +
-                        `**Opened:** <t:${Math.floor(tracked.created_at / 1000)}:R>\n` +
-                        `**Owner:** <@${thread.ownerId}>`
-                    )
-                    .setColor(0xef4444)
-                    .setTimestamp()
-                    .setFooter({ text: 'Impulse Bot • Escalation Alert' });
-
-                await auditChannel.send({ content: `${helperRoles} — unanswered thread needs attention!`, embeds: [escalationEmbed] });
-            }
-        }
+        // Just log it — no pinging, visible in metrics tab
         db.prepare("UPDATE thread_tracking SET escalation_sent = 1 WHERE thread_id = ?").run(tracked.thread_id);
-        logAction(tracked.guild_id, "ESCALATION", `Escalated unanswered thread: ${thread.name}`);
-        console.log(`🚨 Escalated: ${thread.name}`);
+        logAction(
+            tracked.guild_id,
+            "ESCALATION",
+            `Unanswered 24h+: ${thread.name} | Owner: <@${thread.ownerId}> | Opened: <t:${Math.floor(tracked.created_at / 1000)}:R>`,
+            null, null, null, null,
+            tracked.thread_id, null
+        );
+        console.log(`📋 Logged escalation (no ping): ${thread.name}`);
     }, 3, 1500);
 
     // 3. AUTO-CLOSE PHASE
