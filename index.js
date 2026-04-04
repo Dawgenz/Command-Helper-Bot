@@ -188,6 +188,18 @@ db.prepare(`
     )
 `).run();
 
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS helper_profiles (
+        user_id TEXT PRIMARY KEY,
+        display_name TEXT,
+        bio TEXT,
+        banner_color TEXT DEFAULT '#FFAA00',
+        banner_gradient TEXT DEFAULT 'linear-gradient(135deg, #FFAA00, #ff6b00)',
+        badge TEXT,
+        updated_at INTEGER
+    )
+`).run();
+
 try {
     db.prepare(`ALTER TABLE guild_settings ADD COLUMN fun_features_enabled INTEGER DEFAULT 1`).run();
 } catch (e) { /* Column already exists */ }
@@ -552,6 +564,32 @@ function getReadableName(channelId, guildId) {
   } catch (e) {
     return `Channel ${channelId.slice(-4)}`;
   }
+}
+
+// Resolves a Discord user ID to a display name, checking cache → audit_logs → truncated ID
+function resolveUserName(userId) {
+    if (!userId) return 'System';
+    // Check Discord cache first
+    const cached = client.users.cache.get(userId);
+    if (cached) return cached.username;
+    // Fall back to most recent audit log entry for this user
+    const fromLog = db.prepare(
+        "SELECT user_name FROM audit_logs WHERE user_id = ? AND user_name IS NOT NULL ORDER BY timestamp DESC LIMIT 1"
+    ).get(userId);
+    if (fromLog?.user_name) return fromLog.user_name;
+    // Last resort: truncated ID
+    return `User …${userId.slice(-5)}`;
+}
+
+function resolveUserAvatar(userId) {
+    if (!userId) return 'https://cdn.discordapp.com/embed/avatars/0.png';
+    const cached = client.users.cache.get(userId);
+    if (cached) return cached.displayAvatarURL({ size: 64 });
+    const fromLog = db.prepare(
+        "SELECT user_id, user_avatar FROM audit_logs WHERE user_id = ? AND user_avatar IS NOT NULL ORDER BY timestamp DESC LIMIT 1"
+    ).get(userId);
+    if (fromLog?.user_avatar) return fromLog.user_avatar;
+    return `https://cdn.discordapp.com/embed/avatars/${Number(userId) % 5}.png`;
 }
 
 // --- PASSPORT / OAUTH2 CONFIG ---
@@ -2931,19 +2969,26 @@ app.get('/admin/users', requireAdmin, (req, res) => {
                 </div>
                 ${bannedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No globally banned users</p>' : `
                 <div class="divide-y divide-slate-800/40">
-                    ${bannedUsers.map(u => `
+                    ${bannedUsers.map(u => {
+                        const name = resolveUserName(u.user_id);
+                        const avatar = resolveUserAvatar(u.user_id);
+                        const bannedByName = resolveUserName(u.banned_by);
+                        return `
                         <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
-                            <div>
-                                <p class="text-sm font-bold text-white mono">${u.user_id}</p>
-                                <p class="text-[10px] text-slate-500">${u.reason || 'No reason given'} • Banned by ${u.banned_by}</p>
+                            <div class="flex items-center gap-3">
+                                <img src="${avatar}" class="w-8 h-8 rounded-full border border-red-900/40">
+                                <div>
+                                    <p class="text-sm font-bold text-white">${sanitize(name)} <span class="text-slate-600 text-[9px] mono">…${u.user_id.slice(-5)}</span></p>
+                                    <p class="text-[10px] text-slate-500">${sanitize(u.reason || 'No reason given')} • Banned by ${sanitize(bannedByName)}</p>
+                                </div>
                             </div>
                             <div class="flex items-center gap-3">
                                 <span class="text-[9px] text-slate-600 mono">${new Date(u.banned_at).toLocaleDateString()}</span>
-                                <a href="/admin/globalunban/${u.user_id}" onclick="return confirm('Remove from global blacklist?')"
+                                <a href="/admin/globalunban/${u.user_id}" onclick="return confirm('Remove ${sanitize(name)} from global blacklist?')"
                                    class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Unban</a>
                             </div>
-                        </div>
-                    `).join('')}
+                        </div>`;
+                    }).join('')}
                 </div>`}
             </div>
 
@@ -2954,19 +2999,26 @@ app.get('/admin/users', requireAdmin, (req, res) => {
                 </div>
                 ${blockedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No blocked users</p>' : `
                 <div class="divide-y divide-slate-800/40">
-                    ${blockedUsers.map(u => `
-                        <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
-                            <div>
-                                <p class="text-sm font-bold text-white mono">${u.user_id}</p>
-                                <p class="text-[10px] text-slate-500">${u.guild_name || u.guild_id} • ${u.reason || 'No reason'}</p>
-                            </div>
-                            <div class="flex items-center gap-3">
-                                <span class="text-[9px] text-slate-600 mono">${new Date(u.blocked_at).toLocaleDateString()}</span>
-                                <a href="/admin/unblock/${u.guild_id}/${u.user_id}" onclick="return confirm('Unblock this user?')"
-                                   class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Unblock</a>
-                            </div>
-                        </div>
-                    `).join('')}
+                    ${blockedUsers.map(u => {
+                        const name = sanitize(u.user_name || "Unknown User");
+                        const avatar = u.user_avatar || "https://cdn.discordapp.com/embed/avatars/0.png";
+                        const maskedId = u.user_id ? '...' + u.user_id.slice(-5) : "Unknown";
+                        const date = new Date(u.blocked_at).toLocaleDateString();
+
+                        return '<div class="p-4 flex items-center justify-between hover:bg-white/5 transition">' +
+                            '<div class="flex items-center gap-3">' +
+                                '<img src="' + avatar + '" class="w-8 h-8 rounded-full border border-slate-700 shadow-sm" onerror="this.src=\'https://cdn.discordapp.com/embed/avatars/0.png\'">' +
+                                '<div>' +
+                                    '<p class="text-sm font-bold text-white">' + name + ' <span class="text-slate-600 text-[9px] font-mono bg-black/20 px-1 rounded">' + maskedId + '</span></p>' +
+                                    '<p class="text-[10px] text-slate-500">' + sanitize(u.guild_name || "Unknown server") + ' • ' + sanitize(u.reason || "No reason") + '</p>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="flex items-center gap-3">' +
+                                '<span class="text-[9px] text-slate-600 font-mono">' + date + '</span>' +
+                                '<a href="/admin/unblock/' + u.guild_id + '/' + u.user_id + '" onclick="return confirm(\'Unblock this user?\')" class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition px-2 py-1 bg-emerald-400/10 rounded">Unblock</a>' +
+                            '</div>' +
+                        '</div>';
+                    }).join('')}
                 </div>`}
             </div>
 
@@ -2980,8 +3032,8 @@ app.get('/admin/users', requireAdmin, (req, res) => {
                     ${suspendedUsers.map(u => `
                         <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
                             <div>
-                                <p class="text-sm font-bold text-white mono">${u.user_id}</p>
-                                <p class="text-[10px] text-slate-500">${u.guild_name || u.guild_id} • ${u.reason}</p>
+                                <p class="text-sm font-bold text-white">${sanitize(resolveUserName(u.user_id))} <span class="text-slate-600 text-[9px] mono">…${u.user_id.slice(-5)}</span></p>
+                                <p class="text-[10px] text-slate-500">${sanitize(u.guild_name || 'Unknown server')} • ${sanitize(u.reason)}</p>
                             </div>
                             <div class="flex items-center gap-3">
                                 <span class="text-[9px] text-yellow-500 font-bold">Expires <span data-expire="${u.expires_at}">...</span></span>
@@ -3196,6 +3248,239 @@ app.get('/admin/unsuspend/:guildId/:userId', requireAdmin, (req, res) => {
     res.redirect('/admin/users');
 });
 
+app.get("/metrics/leaderboard", async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+
+    const managedGuildIds = getManagedGuilds(req.user.id);
+    if (managedGuildIds.length === 0) return res.redirect("/metrics");
+
+    const selectedGuildId = req.query.guild || managedGuildIds[0];
+
+    const responseTimes = db.prepare(
+        "SELECT first_responder_id FROM thread_tracking WHERE guild_id = ? AND first_responder_id IS NOT NULL"
+    ).all(selectedGuildId);
+
+    const counts = {};
+    for (const t of responseTimes) counts[t.first_responder_id] = (counts[t.first_responder_id] || 0) + 1;
+
+    const leaderboard = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([uid, count]) => ({
+            uid, count,
+            name: resolveUserName(uid),
+            avatar: resolveUserAvatar(uid),
+            profile: db.prepare("SELECT * FROM helper_profiles WHERE user_id = ?").get(uid) || null
+        }));
+
+    const myProfile = db.prepare("SELECT * FROM helper_profiles WHERE user_id = ?").get(req.user.id);
+    const myRank = leaderboard.findIndex(r => r.uid === req.user.id) + 1;
+
+    const gradientPresets = [
+        { label: 'Gold', value: 'linear-gradient(135deg, #FFAA00, #ff6b00)' },
+        { label: 'Ocean', value: 'linear-gradient(135deg, #0ea5e9, #6366f1)' },
+        { label: 'Forest', value: 'linear-gradient(135deg, #10b981, #059669)' },
+        { label: 'Rose', value: 'linear-gradient(135deg, #f43f5e, #ec4899)' },
+        { label: 'Violet', value: 'linear-gradient(135deg, #8b5cf6, #6366f1)' },
+        { label: 'Slate', value: 'linear-gradient(135deg, #334155, #0f172a)' },
+        { label: 'Crimson', value: 'linear-gradient(135deg, #dc2626, #7f1d1d)' },
+        { label: 'Cyan', value: 'linear-gradient(135deg, #06b6d4, #0284c7)' },
+    ];
+
+    res.send(`
+        <html>
+        ${getHead("Impulse | Helper Leaderboard")}
+        <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+        <div class="max-w-5xl mx-auto">
+            ${getNav("metrics", req.user)}
+
+            <div class="flex items-center justify-between mb-8">
+                <div>
+                    <h1 class="text-3xl font-black text-white uppercase tracking-tighter">Helper <span class="text-[#FFAA00]">Leaderboard</span></h1>
+                    <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">First response rankings • Customize your card below</p>
+                </div>
+                <a href="/metrics?guild=${selectedGuildId}" class="text-[9px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition">← Back to Metrics</a>
+            </div>
+
+            <!-- Profile Editor (only shows if logged in user is on the leaderboard) -->
+            ${myRank > 0 ? `
+            <div class="bg-slate-900/40 border border-[#FFAA00]/20 rounded-2xl p-6 mb-8">
+                <h3 class="text-[10px] font-black text-[#FFAA00] uppercase tracking-widest mb-5">✨ Your Rank Card — Customize It</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- Editor -->
+                    <form method="POST" action="/metrics/leaderboard/profile" class="space-y-4">
+                        <input type="hidden" name="guild" value="${selectedGuildId}">
+                        <div>
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Display Name</label>
+                            <input name="display_name" value="${sanitize(myProfile?.display_name || resolveUserName(req.user.id))}"
+                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Bio <span class="text-slate-700 normal-case font-normal">(max 80 chars)</span></label>
+                            <input name="bio" maxlength="80" value="${sanitize(myProfile?.bio || '')}" placeholder="A short tagline..."
+                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Badge Emoji</label>
+                            <input name="badge" maxlength="4" value="${sanitize(myProfile?.badge || '')}" placeholder="🌟"
+                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Banner Style</label>
+                            <div class="grid grid-cols-4 gap-2 mb-2">
+                                ${gradientPresets.map(g => `
+                                    <button type="button" onclick="setGradient('${g.value}')"
+                                        class="h-8 rounded-lg border-2 border-transparent hover:border-white/50 transition cursor-pointer"
+                                        style="background: ${g.value}" title="${g.label}"></button>
+                                `).join('')}
+                            </div>
+                            <input type="hidden" name="banner_gradient" id="bannerGradientInput" value="${myProfile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)'}">
+                            <div class="flex items-center gap-2 mt-2">
+                                <input type="color" name="banner_color" id="bannerColorPicker" value="${myProfile?.banner_color || '#FFAA00'}"
+                                    class="w-8 h-8 rounded cursor-pointer bg-transparent border-none">
+                                <label class="text-[9px] text-slate-500">Accent color (bar + border)</label>
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full bg-[#FFAA00] text-black py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition">
+                            Save Profile
+                        </button>
+                    </form>
+
+                    <!-- Live Preview -->
+                    <div>
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Preview</p>
+                        <div id="cardPreview" class="rounded-xl overflow-hidden border border-slate-800">
+                            <div id="previewBanner" class="h-16 w-full" style="background: ${myProfile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)'}"></div>
+                            <div class="bg-slate-900/80 px-5 pb-4 pt-0 flex items-center justify-between">
+                                <div class="flex items-center gap-3 -mt-5">
+                                    <img src="${resolveUserAvatar(req.user.id)}" class="w-12 h-12 rounded-full border-2 border-slate-900">
+                                    <div class="mt-5">
+                                        <p class="text-sm font-black text-white" id="previewName">${sanitize(myProfile?.display_name || resolveUserName(req.user.id))} <span id="previewBadge" class="text-base">${sanitize(myProfile?.badge || '')}</span></p>
+                                        <p class="text-[10px] text-slate-500 italic" id="previewBio">${sanitize(myProfile?.bio || '')}</p>
+                                    </div>
+                                </div>
+                                <div class="mt-5 text-right">
+                                    <p class="text-xl font-black" id="previewColor" style="color: ${myProfile?.banner_color || '#FFAA00'}">${myRank > 0 ? counts[req.user.id] || 0 : 0}</p>
+                                    <p class="text-[8px] text-slate-600 uppercase font-bold">responses</p>
+                                    <p class="text-[9px] font-black text-slate-400 mt-1">Rank #${myRank}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>` : ''}
+
+            <!-- Full Leaderboard -->
+            <div class="space-y-3">
+                ${leaderboard.map((r, i) => {
+                    const gradient = r.profile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)';
+                    const accentColor = r.profile?.banner_color || '#FFAA00';
+                    const badge = r.profile?.badge || '';
+                    const displayName = r.profile?.display_name || r.name;
+                    const medals = ['🥇', '🥈', '🥉'];
+                    return `
+                    <div class="rounded-2xl overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+                        <div class="h-10 w-full" style="background: ${gradient}"></div>
+                        <div class="bg-slate-900/60 px-5 pb-4 pt-0 flex items-center justify-between">
+                            <div class="flex items-center gap-4 -mt-5">
+                                <div class="relative shrink-0">
+                                    <img src="${r.avatar}" class="w-12 h-12 rounded-full border-2 border-slate-900">
+                                    <span class="absolute -top-1 -right-1 text-sm">${medals[i] || ''}</span>
+                                </div>
+                                <div class="mt-5">
+                                    <div class="flex items-center gap-2">
+                                        <p class="text-sm font-black text-white">${sanitize(displayName)}</p>
+                                        ${badge ? `<span class="text-base">${sanitize(badge)}</span>` : ''}
+                                        ${i >= 3 ? `<span class="text-[9px] font-black text-slate-600">#${i + 1}</span>` : ''}
+                                    </div>
+                                    ${r.profile?.bio ? `<p class="text-[10px] text-slate-500 italic">${sanitize(r.profile.bio)}</p>` : ''}
+                                </div>
+                            </div>
+                            <div class="mt-5 flex items-center gap-4">
+                                <div class="text-right">
+                                    <p class="text-2xl font-black" style="color: ${accentColor}">${r.count}</p>
+                                    <p class="text-[8px] text-slate-600 uppercase font-bold">first responses</p>
+                                </div>
+                                <div class="w-20 bg-slate-800 rounded-full h-2 hidden md:block">
+                                    <div class="h-2 rounded-full transition-all" style="width: ${Math.round((r.count / leaderboard[0].count) * 100)}%; background: ${accentColor}"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('')}
+                ${leaderboard.length === 0 ? `
+                    <div class="text-center py-20">
+                        <p class="text-slate-600 text-sm font-bold uppercase tracking-widest">No response data yet</p>
+                        <p class="text-slate-700 text-xs mt-2">Rankings populate as helpers respond to threads</p>
+                    </div>` : ''}
+            </div>
+        </div>
+
+        <script>
+            function setGradient(gradient) {
+                document.getElementById('bannerGradientInput').value = gradient;
+                document.getElementById('previewBanner').style.background = gradient;
+            }
+
+            // Live preview updates
+            const nameInput = document.querySelector('input[name="display_name"]');
+            const bioInput = document.querySelector('input[name="bio"]');
+            const badgeInput = document.querySelector('input[name="badge"]');
+            const colorPicker = document.getElementById('bannerColorPicker');
+
+            if (nameInput) nameInput.addEventListener('input', e => {
+                document.getElementById('previewName').childNodes[0].textContent = e.target.value || 'Your Name';
+            });
+            if (bioInput) bioInput.addEventListener('input', e => {
+                document.getElementById('previewBio').textContent = e.target.value;
+            });
+            if (badgeInput) badgeInput.addEventListener('input', e => {
+                document.getElementById('previewBadge').textContent = e.target.value;
+            });
+            if (colorPicker) colorPicker.addEventListener('input', e => {
+                document.getElementById('previewColor').style.color = e.target.value;
+            });
+        </script>
+        </body></html>
+    `);
+});
+
+app.post("/metrics/leaderboard/profile", express.urlencoded({ extended: true }), async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+
+    const { display_name, bio, badge, banner_gradient, banner_color, guild } = req.body;
+
+    // Validate — must be on the leaderboard to save a profile
+    const hasResponded = db.prepare(
+        "SELECT 1 FROM thread_tracking WHERE first_responder_id = ? LIMIT 1"
+    ).get(req.user.id);
+
+    if (!hasResponded) {
+        return res.redirect(`/metrics/leaderboard?guild=${guild || ''}`);
+    }
+
+    db.prepare(`
+        INSERT INTO helper_profiles (user_id, display_name, bio, badge, banner_gradient, banner_color, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            display_name = excluded.display_name,
+            bio = excluded.bio,
+            badge = excluded.badge,
+            banner_gradient = excluded.banner_gradient,
+            banner_color = excluded.banner_color,
+            updated_at = excluded.updated_at
+    `).run(
+        req.user.id,
+        sanitize(display_name?.slice(0, 32) || ''),
+        sanitize(bio?.slice(0, 80) || ''),
+        sanitize(badge?.slice(0, 4) || ''),
+        banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)',
+        banner_color || '#FFAA00',
+        Date.now()
+    );
+
+    res.redirect(`/metrics/leaderboard?guild=${guild || ''}`);
+});
+
 app.get("/metrics", async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect("/auth/discord");
 
@@ -3233,7 +3518,17 @@ app.get("/metrics", async (req, res) => {
     }
     const topResponders = Object.entries(responderCounts)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
+        .slice(0, 10)
+        .map(([uid, count]) => {
+            const profile = db.prepare("SELECT * FROM helper_profiles WHERE user_id = ?").get(uid);
+            return {
+                uid,
+                count,
+                name: resolveUserName(uid),
+                avatar: resolveUserAvatar(uid),
+                profile: profile || null
+            };
+        });
 
     // Action counts for charts
     const actionCounts = db.prepare(`
@@ -3313,20 +3608,43 @@ app.get("/metrics", async (req, res) => {
                     </div>
 
                     ${topResponders.length > 0 ? `
-                    <div class="mt-6 space-y-3">
-                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Top Responders</p>
-                        ${topResponders.map(([uid, count], i) => `
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-3">
-                                    <span class="text-[9px] font-black text-slate-600 w-4">#${i + 1}</span>
-                                    <span class="text-xs text-slate-300"><@${uid}> <span class="text-slate-500 text-[10px]">(${uid})</span></span>
+                    <div class="mt-6">
+                        <div class="flex items-center justify-between mb-3">
+                            <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Top Responders</p>
+                            <a href="/metrics/leaderboard?guild=${selectedGuildId}" class="text-[9px] font-black text-[#FFAA00] uppercase tracking-widest hover:underline">Full Board →</a>
+                        </div>
+                        <div class="space-y-2">
+                        ${topResponders.slice(0, 5).map((r, i) => {
+                            const gradient = r.profile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)';
+                            const badge = r.profile?.badge || '';
+                            const bio = r.profile?.bio || '';
+                            return `
+                            <div class="rounded-xl overflow-hidden border border-slate-800 hover:border-[#FFAA00]/30 transition group">
+                                <div class="h-8 w-full" style="background: ${gradient}"></div>
+                                <div class="bg-slate-900/60 px-4 pb-3 pt-0 flex items-center justify-between">
+                                    <div class="flex items-center gap-3 -mt-4">
+                                        <div class="relative">
+                                            <img src="${r.avatar}" class="w-10 h-10 rounded-full border-2 border-slate-900">
+                                            <span class="absolute -top-1 -left-1 text-[10px] font-black bg-slate-900 rounded-full w-5 h-5 flex items-center justify-center border border-slate-700 ${i === 0 ? 'text-[#FFAA00]' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-amber-700' : 'text-slate-600'}">${i + 1}</span>
+                                        </div>
+                                        <div class="mt-4">
+                                            <p class="text-xs font-black text-white">${sanitize(r.name)} ${badge ? `<span class="text-sm">${sanitize(badge)}</span>` : ''}</p>
+                                            ${bio ? `<p class="text-[9px] text-slate-500 italic truncate max-w-[180px]">${sanitize(bio)}</p>` : ''}
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-3 mt-2">
+                                        <div class="text-right">
+                                            <p class="text-lg font-black text-[#FFAA00]">${r.count}</p>
+                                            <p class="text-[8px] text-slate-600 uppercase font-bold">responses</p>
+                                        </div>
+                                        <div class="w-16 bg-slate-800 rounded-full h-1.5 hidden md:block">
+                                            <div class="h-1.5 rounded-full" style="width: ${Math.round((r.count / topResponders[0].count) * 100)}%; background: ${r.profile?.banner_color || '#FFAA00'}"></div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <div class="h-1.5 bg-[#FFAA00] rounded-full" style="width: ${Math.round((count / topResponders[0][1]) * 80)}px"></div>
-                                    <span class="text-[10px] font-black text-[#FFAA00]">${count}</span>
-                                </div>
-                            </div>
-                        `).join('')}
+                            </div>`;
+                        }).join('')}
+                        </div>
                     </div>` : ''}
                 </div>
 
