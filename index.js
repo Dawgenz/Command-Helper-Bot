@@ -1,4 +1,31 @@
 require("dotenv").config();
+
+const REQUIRED_ENV = ['DISCORD_TOKEN', 'CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'SESSION_SECRET', 'ADMIN_DISCORD_ID', 'ADMIN_SECRET'];
+const missingEnv = REQUIRED_ENV.filter(key => !process.env[key]);
+if (missingEnv.length > 0) {
+    console.error(`❌ Missing required environment variables: ${missingEnv.join(', ')}`);
+    process.exit(1);
+}
+
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled promise rejection:', error);
+    try {
+        db.prepare("INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)").run(
+            'SYSTEM', 'ERROR', `Unhandled rejection: ${error?.message || String(error)}`
+        );
+    } catch (e) { /* db might not be ready */ }
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught exception:', error);
+    try {
+        db.prepare("INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)").run(
+            'SYSTEM', 'ERROR', `Uncaught exception: ${error?.message || String(error)}`
+        );
+    } catch (e) {}
+    process.exit(1);
+});
+
 const {
   Client,
   GatewayIntentBits,
@@ -388,6 +415,16 @@ function parseVars(text, interaction = null) {
     : processed.replace(/{br}/g, "\n");
 }
 
+function sanitize(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function getErrorPage(title, message, code = "403") {
   return `
     <html>
@@ -471,6 +508,21 @@ app.use(
 );
 app.use(passport.initialize());
 app.use(cookieParser());
+
+const rateLimit = require('express-rate-limit');
+app.use('/auth', rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: 'Too many auth attempts, try again later.'
+}));
+app.use('/admin/login', rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: 'Too many admin login attempts.'
+}));
+
+app.use(express.json({ limit: '50kb' }));
+app.use(express.urlencoded({ extended: true, limit: '50kb' }));
 app.use(passport.session());
 
 const adminSessions = new Map();
@@ -1830,7 +1882,7 @@ app.get("/snippets", async (req, res) => {
                     <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
                         <div>
                             <div class="flex items-center gap-2">
-                                <p class="font-bold text-white">${s.name}</p>
+                                <p class="font-bold text-white">${sanitize(s.name)}</p>
                                 <span class="text-[9px] bg-slate-800 px-2 py-0.5 rounded text-slate-500">${
                                   guild ? guild.name : "Unknown Server"
                                 }</span>
@@ -2097,7 +2149,6 @@ app.get("/snippets/new", (req, res) => {
 
 app.post(
   "/snippets/new",
-  express.urlencoded({ extended: true }),
   async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect("/auth/discord");
 
@@ -2228,9 +2279,7 @@ app.get("/snippets/edit/:id", async (req, res) => {
             
             <div class="mb-8">
                 <h1 class="text-3xl font-black text-white uppercase tracking-tighter text-[#FFAA00]">Edit Snippet</h1>
-                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying trigger: /snippet name:${
-                  snippet.name
-                }</p>
+                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying trigger: /snippet name:${sanitize(snippet.name)}</p>
             </div>
 
             <form id="editForm" method="POST" action="/snippets/edit/${
@@ -2346,7 +2395,6 @@ app.get("/snippets/edit/:id", async (req, res) => {
 
 app.post(
   "/snippets/edit/:id",
-  express.urlencoded({ extended: true }),
   async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect("/auth/discord");
 
@@ -2598,7 +2646,7 @@ app.get('/admin/login', (req, res) => {
     `);
 });
 
-app.post('/admin/login', express.urlencoded({ extended: true }), (req, res) => {
+app.post('/admin/login', (req, res) => {
     if (!req.isAuthenticated()) return res.redirect('/auth/discord');
     if (req.user.id !== process.env.ADMIN_DISCORD_ID) return res.status(403).send('Forbidden');
 
@@ -4073,10 +4121,11 @@ client.on("interactionCreate", async (interaction) => {
     const dryRun = interaction.options.getBoolean('dry_run') ?? false;
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
-    await interaction.deferReply({ ephemeral: true });
-
     try {
         const forumChannel = await client.channels.fetch(settings.forum_id).catch(() => null);
+        if (!forumChannel) return interaction.reply({ content: '❌ Could not fetch the configured forum channel. Has `/setup` been run?', ephemeral: true });
+
+        await interaction.deferReply({ ephemeral: true });
         if (!forumChannel) {
             return interaction.editReply('❌ Could not fetch the configured forum channel.');
         }
@@ -4197,7 +4246,7 @@ client.on("interactionCreate", async (interaction) => {
 
     } catch (err) {
         console.error('closethreads error:', err);
-        await interaction.editReply('❌ An error occurred during bulk close. Check the PM2 logs.');
+        await interaction.editReply('❌ An error occurred during bulk close. Check the logs.');
     }
   }
 });
