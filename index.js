@@ -4595,6 +4595,18 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.commandName === "resolved") {
+
+    const isOwner = interaction.user.id === interaction.channel.ownerId;
+    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+    const isHelper = hasHelperRole(interaction.member, settings);
+
+    if (!isOwner && !isAdmin && !isHelper) {
+      return interaction.reply({
+        content: "❌ **Access Denied:** Only the thread creator or staff/helpers can mark this as resolved.",
+        ephemeral: true,
+      });
+    }
+
     const lockTime = Date.now() + 30 * 60 * 1000; // Hardcoded 30 mins
 
     db.prepare(
@@ -4638,6 +4650,17 @@ client.on("interactionCreate", async (interaction) => {
         content: "❌ Not configured.",
         ephemeral: true,
       });
+
+    const isOwner = interaction.user.id === interaction.channel.ownerId;
+    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+    const isHelper = hasHelperRole(interaction.member, settings);
+
+    if (!isOwner && !isAdmin && !isHelper) {
+      return interaction.reply({
+        content: "❌ **Access Denied:** Only the thread creator or staff/helpers can cancel timers.",
+        ephemeral: true,
+      });
+    }
 
     const existing = db
       .prepare("SELECT * FROM pending_locks WHERE thread_id = ?")
