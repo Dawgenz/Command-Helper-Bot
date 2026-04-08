@@ -1,48 +1,68 @@
-require("dotenv").config();
+require('dotenv').config()
 
-const REQUIRED_ENV = ['DISCORD_TOKEN', 'CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'SESSION_SECRET', 'ADMIN_DISCORD_ID', 'ADMIN_SECRET'];
-const missingEnv = REQUIRED_ENV.filter(key => !process.env[key]);
+const REQUIRED_ENV = [
+  'DISCORD_TOKEN',
+  'CLIENT_ID',
+  'CLIENT_SECRET',
+  'REDIRECT_URI',
+  'SESSION_SECRET',
+  'ADMIN_DISCORD_ID',
+  'ADMIN_SECRET'
+]
+const missingEnv = REQUIRED_ENV.filter(key => !process.env[key])
 if (missingEnv.length > 0) {
-    console.error(`❌ Missing required environment variables: ${missingEnv.join(', ')}`);
-    process.exit(1);
+  console.error(
+    `❌ Missing required environment variables: ${missingEnv.join(', ')}`
+  )
+  process.exit(1)
 }
 
-process.on('unhandledRejection', (error) => {
-    console.error('Unhandled promise rejection:', error);
-    try {
-        db.prepare("INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)").run(
-            'SYSTEM', 'ERROR', `Unhandled rejection: ${error?.message || String(error)}`
-        );
-    } catch (e) { /* db might not be ready */ }
-});
+process.on('unhandledRejection', error => {
+  console.error('Unhandled promise rejection:', error)
+  try {
+    db.prepare(
+      'INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)'
+    ).run(
+      'SYSTEM',
+      'ERROR',
+      `Unhandled rejection: ${error?.message || String(error)}`
+    )
+  } catch (e) {
+    /* db might not be ready */
+  }
+})
 
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught exception:', error);
-    try {
-        db.prepare("INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)").run(
-            'SYSTEM', 'ERROR', `Uncaught exception: ${error?.message || String(error)}`
-        );
-    } catch (e) {}
-    process.exit(1);
-});
+process.on('uncaughtException', error => {
+  console.error('Uncaught exception:', error)
+  try {
+    db.prepare(
+      'INSERT INTO audit_logs (guild_id, action, details) VALUES (?, ?, ?)'
+    ).run(
+      'SYSTEM',
+      'ERROR',
+      `Uncaught exception: ${error?.message || String(error)}`
+    )
+  } catch (e) {}
+  process.exit(1)
+})
 
 const {
   Client,
   GatewayIntentBits,
   PermissionFlagsBits,
   EmbedBuilder,
-  Partials,
-} = require("discord.js");
-const Database = require("better-sqlite3");
-const express = require("express");
-const cookieParser = require('cookie-parser');
-const passport = require("passport");
-const { Strategy } = require("passport-discord");
-const session = require("express-session");
-const SQLiteStore = require("connect-sqlite3")(session);
+  Partials
+} = require('discord.js')
+const Database = require('better-sqlite3')
+const express = require('express')
+const cookieParser = require('cookie-parser')
+const passport = require('passport')
+const { Strategy } = require('passport-discord')
+const session = require('express-session')
+const SQLiteStore = require('connect-sqlite3')(session)
 
-const db = new Database("database.db");
-const app = express();
+const db = new Database('database.db')
+const app = express()
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -50,10 +70,10 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessageReactions, // Added for the link reaction
-    GatewayIntentBits.DirectMessages, // Added for DMing the link
+    GatewayIntentBits.DirectMessages // Added for DMing the link
   ],
-  partials: [Partials.Message, Partials.Reaction, Partials.User],
-});
+  partials: [Partials.Message, Partials.Reaction, Partials.User]
+})
 db.prepare(
   `CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id TEXT PRIMARY KEY,
@@ -64,7 +84,7 @@ db.prepare(
     unanswered_tag TEXT,
     helper_role_id TEXT
 )`
-).run();
+).run()
 
 db.prepare(
   `CREATE TABLE IF NOT EXISTS thread_tracking (
@@ -74,11 +94,11 @@ db.prepare(
     stale_warning_sent INTEGER DEFAULT 0,
     last_renewed_at INTEGER
 )`
-).run();
+).run()
 
 db.prepare(
-  "CREATE TABLE IF NOT EXISTS pending_locks (thread_id TEXT PRIMARY KEY, guild_id TEXT, lock_at INTEGER)"
-).run();
+  'CREATE TABLE IF NOT EXISTS pending_locks (thread_id TEXT PRIMARY KEY, guild_id TEXT, lock_at INTEGER)'
+).run()
 
 db.prepare(
   `CREATE TABLE IF NOT EXISTS audit_logs (
@@ -92,7 +112,7 @@ db.prepare(
     command_used TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )`
-).run();
+).run()
 
 db.prepare(
   `
@@ -112,7 +132,7 @@ CREATE TABLE IF NOT EXISTS snippets (
     UNIQUE(guild_id, name)
 )
 `
-).run();
+).run()
 
 db.prepare(
   `CREATE TABLE IF NOT EXISTS thread_links (
@@ -122,9 +142,10 @@ db.prepare(
     created_by TEXT,
     created_at INTEGER
 )`
-).run();
+).run()
 
-db.prepare(`
+db.prepare(
+  `
     CREATE TABLE IF NOT EXISTS reaction_triggers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id TEXT,
@@ -134,17 +155,21 @@ db.prepare(`
         response_text TEXT DEFAULT 'L color',
         enabled INTEGER DEFAULT 1
     )
-`).run();
+`
+).run()
 
-db.prepare(`
+db.prepare(
+  `
     CREATE TABLE IF NOT EXISTS triggered_messages (
         message_id TEXT,
         trigger_id INTEGER,
         PRIMARY KEY (message_id, trigger_id)
     )
-`).run();
+`
+).run()
 
-db.prepare(`
+db.prepare(
+  `
     CREATE TABLE IF NOT EXISTS blocked_users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id TEXT,
@@ -154,18 +179,22 @@ db.prepare(`
         blocked_at INTEGER,
         UNIQUE(guild_id, user_id)
     )
-`).run();
+`
+).run()
 
-db.prepare(`
+db.prepare(
+  `
     CREATE TABLE IF NOT EXISTS banned_users (
         user_id TEXT PRIMARY KEY,
         reason TEXT,
         banned_by TEXT,
         banned_at INTEGER
     )
-`).run();
+`
+).run()
 
-db.prepare(`
+db.prepare(
+  `
     CREATE TABLE IF NOT EXISTS command_cooldowns (
         user_id TEXT,
         guild_id TEXT,
@@ -174,9 +203,11 @@ db.prepare(`
         use_count INTEGER DEFAULT 1,
         PRIMARY KEY (user_id, guild_id, command)
     )
-`).run();
+`
+).run()
 
-db.prepare(`
+db.prepare(
+  `
     CREATE TABLE IF NOT EXISTS suspended_users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id TEXT,
@@ -186,9 +217,11 @@ db.prepare(`
         expires_at INTEGER,
         UNIQUE(guild_id, user_id)
     )
-`).run();
+`
+).run()
 
-db.prepare(`
+db.prepare(
+  `
     CREATE TABLE IF NOT EXISTS helper_profiles (
         user_id TEXT PRIMARY KEY,
         display_name TEXT,
@@ -198,29 +231,34 @@ db.prepare(`
         badge TEXT,
         updated_at INTEGER
     )
-`).run();
+`
+).run()
 
 try {
-    db.prepare(`ALTER TABLE guild_settings ADD COLUMN fun_features_enabled INTEGER DEFAULT 1`).run();
-} catch (e) { /* Column already exists */ }
+  db.prepare(
+    `ALTER TABLE guild_settings ADD COLUMN fun_features_enabled INTEGER DEFAULT 1`
+  ).run()
+} catch (e) {
+  /* Column already exists */
+}
 
 try {
-  db.prepare(`ALTER TABLE snippets ADD COLUMN url TEXT`).run();
-  db.prepare(`ALTER TABLE snippets ADD COLUMN image_url TEXT`).run();
-  db.prepare(`ALTER TABLE snippets ADD COLUMN thumbnail_url TEXT`).run();
+  db.prepare(`ALTER TABLE snippets ADD COLUMN url TEXT`).run()
+  db.prepare(`ALTER TABLE snippets ADD COLUMN image_url TEXT`).run()
+  db.prepare(`ALTER TABLE snippets ADD COLUMN thumbnail_url TEXT`).run()
 } catch (e) {
   // Columns already exist
 }
 
 try {
-  db.prepare(`ALTER TABLE audit_logs ADD COLUMN thread_id TEXT`).run();
-  db.prepare(`ALTER TABLE audit_logs ADD COLUMN message_id TEXT`).run();
+  db.prepare(`ALTER TABLE audit_logs ADD COLUMN thread_id TEXT`).run()
+  db.prepare(`ALTER TABLE audit_logs ADD COLUMN message_id TEXT`).run()
 } catch (e) {
   /* Columns exist */
 }
 
 try {
-  db.prepare(`ALTER TABLE guild_settings ADD COLUMN unanswered_tag TEXT`).run();
+  db.prepare(`ALTER TABLE guild_settings ADD COLUMN unanswered_tag TEXT`).run()
 } catch (e) {
   /* Column exists */
 }
@@ -228,51 +266,73 @@ try {
 try {
   db.prepare(
     `ALTER TABLE thread_tracking ADD COLUMN stale_warning_sent INTEGER DEFAULT 0`
-  ).run();
+  ).run()
   db.prepare(
     `ALTER TABLE thread_tracking ADD COLUMN last_renewed_at INTEGER`
-  ).run();
+  ).run()
 } catch (e) {
   /* Columns exist */
 }
 
 try {
-    db.prepare(`ALTER TABLE guild_settings ADD COLUMN audit_channel_id TEXT`).run();
-} catch (e) { /* exists */ }
+  db.prepare(
+    `ALTER TABLE guild_settings ADD COLUMN audit_channel_id TEXT`
+  ).run()
+} catch (e) {
+  /* exists */
+}
 
 try {
-    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN escalation_sent INTEGER DEFAULT 0`).run();
-} catch (e) { /* exists */ }
+  db.prepare(
+    `ALTER TABLE thread_tracking ADD COLUMN escalation_sent INTEGER DEFAULT 0`
+  ).run()
+} catch (e) {
+  /* exists */
+}
 
 try {
-    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN first_response_at INTEGER`).run();
-    db.prepare(`ALTER TABLE thread_tracking ADD COLUMN first_responder_id TEXT`).run();
-} catch (e) { /* exists */ }
+  db.prepare(
+    `ALTER TABLE thread_tracking ADD COLUMN first_response_at INTEGER`
+  ).run()
+  db.prepare(
+    `ALTER TABLE thread_tracking ADD COLUMN first_responder_id TEXT`
+  ).run()
+} catch (e) {
+  /* exists */
+}
 
 try {
-    db.prepare(`ALTER TABLE helper_profiles ADD COLUMN banner_animation TEXT DEFAULT 'none'`).run();
-} catch (e) { /* exists */ }
+  db.prepare(
+    `ALTER TABLE helper_profiles ADD COLUMN banner_animation TEXT DEFAULT 'none'`
+  ).run()
+} catch (e) {
+  /* exists */
+}
 
 // --- HELPERS ---
-const getSettings = (guildId) =>
-  db.prepare("SELECT * FROM guild_settings WHERE guild_id = ?").get(guildId);
+const getSettings = guildId =>
+  db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guildId)
 
-function getNav(activePage, user) {
-  const current = activePage === "home" ? "overview" : activePage;
-  const pages = ["overview", "snippets", "threads", "fun", "logs", "metrics"];
-  const isAdmin = user && user.id === process.env.ADMIN_DISCORD_ID;
+function getNav (activePage, user) {
+  const current = activePage === 'home' ? 'overview' : activePage
+  const pages = ['overview', 'snippets', 'threads', 'fun', 'logs', 'metrics']
+  const isAdmin = user && user.id === process.env.ADMIN_DISCORD_ID
 
   const profileSection = user
     ? `
         <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 shadow-xl">
             <div class="text-right hidden sm:block">
-                <p class="text-[10px] font-black text-white uppercase leading-none">${sanitize(user.username)}</p>
+                <p class="text-[10px] font-black text-white uppercase leading-none">${sanitize(
+                  user.username
+                )}</p>
                 <a href="/logout" class="text-[8px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Terminate Session</a>
             </div>
-            <img src="https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png" class="w-8 h-8 rounded-full border-2 border-[#FFAA00]">
+            <img src="https://cdn.discordapp.com/avatars/${user.id}/${
+        user.avatar
+      }.png" class="w-8 h-8 rounded-full border-2 border-[#FFAA00]">
         </div>
     `
-    : "";
+    : ''
 
   return `
     <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
@@ -285,30 +345,30 @@ function getNav(activePage, user) {
         </div>
 
         <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800 backdrop-blur-md">
-            ${[...pages, ...(isAdmin ? ["admin"] : [])]
+            ${[...pages, ...(isAdmin ? ['admin'] : [])]
               .map(
-                (p) => `
-                <a href="/${p === "overview" ? "" : p}"
+                p => `
+                <a href="/${p === 'overview' ? '' : p}"
                    class="px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                      current === p
-                       ? "bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10"
-                       : "text-slate-500 hover:text-white"
+                       ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/10'
+                       : 'text-slate-500 hover:text-white'
                    }">
                     ${p}
                 </a>
             `
               )
-              .join("")}
+              .join('')}
         </div>
 
         ${profileSection}
     </nav>
-    `;
+    `
 }
 
-function getAdminNav(activePage) {
-    const pages = ['overview', 'users', 'errors', 'database', 'system'];
-    return `
+function getAdminNav (activePage) {
+  const pages = ['overview', 'users', 'errors', 'database', 'system']
+  return `
     <nav class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
         <div class="flex items-center gap-4">
             <div class="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/40 flex items-center justify-center">
@@ -323,23 +383,27 @@ function getAdminNav(activePage) {
         </div>
 
         <div class="flex items-center bg-slate-900/50 p-1.5 rounded-2xl border border-red-900/30 backdrop-blur-md">
-            ${pages.map(p => `
+            ${pages
+              .map(
+                p => `
                 <a href="/admin/${p === 'overview' ? '' : p}" 
                    class="px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                      activePage === p
-                       ? "bg-red-500 text-white shadow-lg shadow-red-500/20"
-                       : "text-slate-500 hover:text-white"
+                       ? 'bg-red-500 text-white shadow-lg shadow-red-500/20'
+                       : 'text-slate-500 hover:text-white'
                    }">
                     ${p}
                 </a>
-            `).join('')}
+            `
+              )
+              .join('')}
         </div>
 
         <div class="flex items-center gap-3">
             <span class="text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-3 py-1.5 rounded-lg border border-red-500/20">⚡ Root Access</span>
             <a href="/admin/logout" class="text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-widest transition">Terminate →</a>
         </div>
-    </nav>`;
+    </nav>`
 }
 
 const logAction = (
@@ -354,7 +418,7 @@ const logAction = (
   messageId = null
 ) => {
   db.prepare(
-    "INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used, thread_id, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    'INSERT INTO audit_logs (guild_id, action, details, user_id, user_name, user_avatar, command_used, thread_id, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
     guildId,
     action,
@@ -365,114 +429,197 @@ const logAction = (
     command,
     threadId,
     messageId
-  );
-};
-
-async function logToDiscord(guildId, action, details, userId = null, color = 0xFFAA00) {
-    try {
-        const settings = getSettings(guildId);
-        if (!settings?.audit_channel_id) return;
-
-        const channel = await client.channels.fetch(settings.audit_channel_id).catch(() => null);
-        if (!channel) return;
-
-        const actionColors = {
-            LOCK: 0xf59e0b, AUTO_CLOSE: 0x6b7280, RESOLVED: 0x10b981,
-            DUPLICATE: 0x0ea5e9, SNIPPET_DELETE: 0xef4444, USER_BLOCKED: 0xef4444,
-            USER_BANNED: 0x7f1d1d, AUTO_SUSPEND: 0xf97316, BULK_CLOSE: 0x6b7280,
-            STALE_WARNING: 0xf59e0b, SNIPPET_CREATE: 0x3b82f6, SETUP: 0x10b981,
-        };
-
-        const embed = new EmbedBuilder()
-            .setTitle(`📋 ${action.replace(/_/g, ' ')}`)
-            .setDescription(details)
-            .setColor(actionColors[action] || color)
-            .setTimestamp()
-            .setFooter({ text: 'Impulse Bot • Audit Log' });
-
-        if (userId) embed.addFields({ name: 'User', value: `<@${userId}>`, inline: true });
-
-        await channel.send({ embeds: [embed] });
-    } catch (e) {
-        console.error('Discord audit log error:', e.message);
-    }
+  )
 }
 
-function hasHelperRole(member, settings) {
-  if (!settings.helper_role_id) return false;
-  const roleIDs = settings.helper_role_id.split(",").map((id) => id.trim());
-  return member.roles.cache.some((role) => roleIDs.includes(role.id));
+async function logToDiscord (
+  guildId,
+  action,
+  details,
+  userId = null,
+  color = 0xffaa00
+) {
+  try {
+    const settings = getSettings(guildId)
+    if (!settings?.audit_channel_id) return
+
+    const channel = await client.channels
+      .fetch(settings.audit_channel_id)
+      .catch(() => null)
+    if (!channel) return
+
+    const actionColors = {
+      LOCK: 0xf59e0b,
+      AUTO_CLOSE: 0x6b7280,
+      RESOLVED: 0x10b981,
+      DUPLICATE: 0x0ea5e9,
+      SNIPPET_DELETE: 0xef4444,
+      USER_BLOCKED: 0xef4444,
+      USER_BANNED: 0x7f1d1d,
+      AUTO_SUSPEND: 0xf97316,
+      BULK_CLOSE: 0x6b7280,
+      STALE_WARNING: 0xf59e0b,
+      SNIPPET_CREATE: 0x3b82f6,
+      SETUP: 0x10b981
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(`📋 ${action.replace(/_/g, ' ')}`)
+      .setDescription(details)
+      .setColor(actionColors[action] || color)
+      .setTimestamp()
+      .setFooter({ text: 'Impulse Bot • Audit Log' })
+
+    if (userId)
+      embed.addFields({ name: 'User', value: `<@${userId}>`, inline: true })
+
+    await channel.send({ embeds: [embed] })
+  } catch (e) {
+    console.error('Discord audit log error:', e.message)
+  }
 }
 
-function isUserBlocked(userId, guildId) {
-    const banned = db.prepare("SELECT 1 FROM banned_users WHERE user_id = ?").get(userId);
-    if (banned) return { blocked: true, reason: "You are globally banned from using this bot." };
-    const blocked = db.prepare("SELECT reason FROM blocked_users WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
-    if (blocked) return { blocked: true, reason: `You are blocked from using bot commands in this server.${blocked.reason ? ` Reason: ${blocked.reason}` : ''}` };
-    const suspended = db.prepare("SELECT reason, expires_at FROM suspended_users WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
-    if (suspended) {
-        if (suspended.expires_at && Date.now() > suspended.expires_at) {
-            db.prepare("DELETE FROM suspended_users WHERE user_id = ? AND guild_id = ?").run(userId, guildId);
-            return { blocked: false };
-        }
-        const expiresIn = suspended.expires_at ? `<t:${Math.floor(suspended.expires_at / 1000)}:R>` : 'indefinitely';
-        return { blocked: true, reason: `You are temporarily suspended from using bot commands. Expires ${expiresIn}.` };
+function hasHelperRole (member, settings) {
+  if (!settings.helper_role_id) return false
+  const roleIDs = settings.helper_role_id.split(',').map(id => id.trim())
+  return member.roles.cache.some(role => roleIDs.includes(role.id))
+}
+
+function isUserBlocked (userId, guildId) {
+  const banned = db
+    .prepare('SELECT 1 FROM banned_users WHERE user_id = ?')
+    .get(userId)
+  if (banned)
+    return {
+      blocked: true,
+      reason: 'You are globally banned from using this bot.'
     }
-    return { blocked: false };
+  const blocked = db
+    .prepare(
+      'SELECT reason FROM blocked_users WHERE user_id = ? AND guild_id = ?'
+    )
+    .get(userId, guildId)
+  if (blocked)
+    return {
+      blocked: true,
+      reason: `You are blocked from using bot commands in this server.${
+        blocked.reason ? ` Reason: ${blocked.reason}` : ''
+      }`
+    }
+  const suspended = db
+    .prepare(
+      'SELECT reason, expires_at FROM suspended_users WHERE user_id = ? AND guild_id = ?'
+    )
+    .get(userId, guildId)
+  if (suspended) {
+    if (suspended.expires_at && Date.now() > suspended.expires_at) {
+      db.prepare(
+        'DELETE FROM suspended_users WHERE user_id = ? AND guild_id = ?'
+      ).run(userId, guildId)
+      return { blocked: false }
+    }
+    const expiresIn = suspended.expires_at
+      ? `<t:${Math.floor(suspended.expires_at / 1000)}:R>`
+      : 'indefinitely'
+    return {
+      blocked: true,
+      reason: `You are temporarily suspended from using bot commands. Expires ${expiresIn}.`
+    }
+  }
+  return { blocked: false }
 }
 
 // Returns true if the user should be rate limited, auto-suspends on spam
-function checkCooldown(userId, guildId, command, limitSeconds = 10, maxUses = 3) {
-    const now = Date.now();
-    const window = limitSeconds * 1000;
-    const row = db.prepare("SELECT last_used, use_count FROM command_cooldowns WHERE user_id = ? AND guild_id = ? AND command = ?").get(userId, guildId, command);
-    
-    if (!row) {
-        db.prepare("INSERT INTO command_cooldowns (user_id, guild_id, command, last_used, use_count) VALUES (?, ?, ?, ?, 1)").run(userId, guildId, command, now);
-        return { limited: false };
+function checkCooldown (
+  userId,
+  guildId,
+  command,
+  limitSeconds = 10,
+  maxUses = 3
+) {
+  const now = Date.now()
+  const window = limitSeconds * 1000
+  const row = db
+    .prepare(
+      'SELECT last_used, use_count FROM command_cooldowns WHERE user_id = ? AND guild_id = ? AND command = ?'
+    )
+    .get(userId, guildId, command)
+
+  if (!row) {
+    db.prepare(
+      'INSERT INTO command_cooldowns (user_id, guild_id, command, last_used, use_count) VALUES (?, ?, ?, ?, 1)'
+    ).run(userId, guildId, command, now)
+    return { limited: false }
+  }
+
+  const timeSince = now - row.last_used
+  if (timeSince > window) {
+    // Reset window
+    db.prepare(
+      'UPDATE command_cooldowns SET last_used = ?, use_count = 1 WHERE user_id = ? AND guild_id = ? AND command = ?'
+    ).run(now, userId, guildId, command)
+    return { limited: false }
+  }
+
+  const newCount = row.use_count + 1
+  db.prepare(
+    'UPDATE command_cooldowns SET use_count = ?, last_used = ? WHERE user_id = ? AND guild_id = ? AND command = ?'
+  ).run(newCount, now, userId, guildId, command)
+
+  if (newCount > maxUses * 2) {
+    // Only auto-suspend if they hit DOUBLE the limit — genuine spam
+    const suspendUntil = now + 5 * 60 * 1000 // 5 min instead of 10
+    db.prepare(
+      'INSERT OR REPLACE INTO suspended_users (guild_id, user_id, reason, suspended_at, expires_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(
+      guildId,
+      userId,
+      `Auto-suspended: Spammed /${command} ${newCount} times in ${limitSeconds}s`,
+      now,
+      suspendUntil
+    )
+    return {
+      limited: true,
+      suspended: true,
+      message: `⚠️ You've been temporarily suspended for **5 minutes** due to excessive command spam.`
     }
+  }
 
-    const timeSince = now - row.last_used;
-    if (timeSince > window) {
-        // Reset window
-        db.prepare("UPDATE command_cooldowns SET last_used = ?, use_count = 1 WHERE user_id = ? AND guild_id = ? AND command = ?").run(now, userId, guildId, command);
-        return { limited: false };
-    }
-
-    const newCount = row.use_count + 1;
-    db.prepare("UPDATE command_cooldowns SET use_count = ?, last_used = ? WHERE user_id = ? AND guild_id = ? AND command = ?").run(newCount, now, userId, guildId, command);
-
-    if (newCount > maxUses * 2) {
-        // Only auto-suspend if they hit DOUBLE the limit — genuine spam
-        const suspendUntil = now + 5 * 60 * 1000; // 5 min instead of 10
-        db.prepare("INSERT OR REPLACE INTO suspended_users (guild_id, user_id, reason, suspended_at, expires_at) VALUES (?, ?, ?, ?, ?)").run(
-            guildId, userId, `Auto-suspended: Spammed /${command} ${newCount} times in ${limitSeconds}s`, now, suspendUntil
-        );
-        return { limited: true, suspended: true, message: `⚠️ You've been temporarily suspended for **5 minutes** due to excessive command spam.` };
-    }
-
-    const retryAfter = Math.ceil((window - timeSince) / 1000);
-    return { limited: true, message: `⏳ Slow down! You can use this command again in **${retryAfter}s**.` };
+  const retryAfter = Math.ceil((window - timeSince) / 1000)
+  return {
+    limited: true,
+    message: `⏳ Slow down! You can use this command again in **${retryAfter}s**.`
+  }
 }
 
-function parseVars(text, interaction = null) {
-  if (!text || text === "null") return "";
-  let processed = String(text);
+function parseVars (text, interaction = null) {
+  if (!text || text === 'null') return ''
+  let processed = String(text)
 
   if (interaction) {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
-    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const memberCount = interaction.guild.memberCount ?? '?';
+    const now = new Date()
+    const timeStr =
+      now.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'UTC'
+      }) + ' UTC'
+    const dateStr = now.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    })
+    const memberCount = interaction.guild.memberCount ?? '?'
 
     // Thread-specific vars — only available if in a thread
-    const isThread = interaction.channel?.isThread?.();
-    const threadAuthor = isThread && interaction.channel.ownerId
+    const isThread = interaction.channel?.isThread?.()
+    const threadAuthor =
+      isThread && interaction.channel.ownerId
         ? `<@${interaction.channel.ownerId}>`
-        : interaction.user.toString();
+        : interaction.user.toString()
     const threadLink = isThread
-        ? `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}`
-        : '';
+      ? `https://discord.com/channels/${interaction.guildId}/${interaction.channelId}`
+      : ''
 
     processed = processed
       .replace(/{user}/g, interaction.user.toString())
@@ -483,43 +630,43 @@ function parseVars(text, interaction = null) {
       .replace(/{thread_link}/g, threadLink)
       .replace(/{current_time}/g, timeStr)
       .replace(/{current_date}/g, dateStr)
-      .replace(/{member_count}/g, memberCount.toLocaleString());
+      .replace(/{member_count}/g, memberCount.toLocaleString())
   }
 
-  processed = processed.replace(/{br}/g, "\n");
+  processed = processed.replace(/{br}/g, '\n')
 
   return processed.length > 4000
-    ? processed.substring(0, 4000) + "..."
-    : processed;
+    ? processed.substring(0, 4000) + '...'
+    : processed
 }
 
-function sanitize(str) {
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+function sanitize (str) {
+  if (!str) return ''
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
 
-function parseDuration(str) {
-    if (!str) return null;
-    if (str.toLowerCase() === 'permanent') return null; // null = no expiry
+function parseDuration (str) {
+  if (!str) return null
+  if (str.toLowerCase() === 'permanent') return null // null = no expiry
 
-    const match = str.match(/^(\d+)(m|h|d|w)$/i);
-    if (!match) return undefined; // undefined = invalid format
+  const match = str.match(/^(\d+)(m|h|d|w)$/i)
+  if (!match) return undefined // undefined = invalid format
 
-    const amount = parseInt(match[1]);
-    const unit = match[2].toLowerCase();
-    const multipliers = { m: 60000, h: 3600000, d: 86400000, w: 604800000 };
-    return Date.now() + amount * multipliers[unit];
+  const amount = parseInt(match[1])
+  const unit = match[2].toLowerCase()
+  const multipliers = { m: 60000, h: 3600000, d: 86400000, w: 604800000 }
+  return Date.now() + amount * multipliers[unit]
 }
 
-function getErrorPage(title, message, code = "403") {
+function getErrorPage (title, message, code = '403') {
   return `
     <html>
-    ${getHead("Impulse | " + title)}
+    ${getHead('Impulse | ' + title)}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen flex items-center justify-center p-6">
         <div class="max-w-md w-full text-center space-y-6">
             <div class="relative">
@@ -546,59 +693,63 @@ function getErrorPage(title, message, code = "403") {
         </div>
     </body>
     </html>
-    `;
+    `
 }
 
-function getDiscordLink(guildId, channelId, messageId = null) {
+function getDiscordLink (guildId, channelId, messageId = null) {
   if (messageId) {
-    return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
+    return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`
   }
-  return `https://discord.com/channels/${guildId}/${channelId}`;
+  return `https://discord.com/channels/${guildId}/${channelId}`
 }
 
-function getReadableName(channelId, guildId) {
+function getReadableName (channelId, guildId) {
   try {
-    const guild = client.guilds.cache.get(guildId);
-    if (!guild) return `Channel ${channelId.slice(-4)}`;
+    const guild = client.guilds.cache.get(guildId)
+    const channel = guild?.channels.cache.get(channelId)
 
-    const channel = guild.channels.cache.get(channelId);
-    if (!channel) return `Channel ${channelId.slice(-4)}`;
-
-    return channel.name;
+    if (channel) return channel.name
+    const settings = getSettings(guildId)
+    if (settings && settings.forum_id === channelId) return 'Main Forum'
+    return `Thread #${channelId.slice(-4)}`
   } catch (e) {
-    return `Channel ${channelId.slice(-4)}`;
+    return `ID: ${channelId.slice(-4)}`
   }
 }
 
 // Resolves a Discord user ID to a display name, checking cache → audit_logs → truncated ID
-function resolveUserName(userId) {
-    if (!userId) return 'System';
-    // Check Discord cache first
-    const cached = client.users.cache.get(userId);
-    if (cached) return cached.username;
-    // Fall back to most recent audit log entry for this user
-    const fromLog = db.prepare(
-        "SELECT user_name FROM audit_logs WHERE user_id = ? AND user_name IS NOT NULL ORDER BY timestamp DESC LIMIT 1"
-    ).get(userId);
-    if (fromLog?.user_name) return fromLog.user_name;
-    // Last resort: truncated ID
-    return `User …${userId.slice(-5)}`;
+function resolveUserName (userId) {
+  if (!userId) return 'System'
+  // Check Discord cache first
+  const cached = client.users.cache.get(userId)
+  if (cached) return cached.username
+  // Fall back to most recent audit log entry for this user
+  const fromLog = db
+    .prepare(
+      'SELECT user_name FROM audit_logs WHERE user_id = ? AND user_name IS NOT NULL ORDER BY timestamp DESC LIMIT 1'
+    )
+    .get(userId)
+  if (fromLog?.user_name) return fromLog.user_name
+  // Last resort: truncated ID
+  return `User …${userId.slice(-5)}`
 }
 
-function resolveUserAvatar(userId) {
-    if (!userId) return 'https://cdn.discordapp.com/embed/avatars/0.png';
-    const cached = client.users.cache.get(userId);
-    if (cached) return cached.displayAvatarURL({ size: 64 });
-    const fromLog = db.prepare(
-        "SELECT user_id, user_avatar FROM audit_logs WHERE user_id = ? AND user_avatar IS NOT NULL ORDER BY timestamp DESC LIMIT 1"
-    ).get(userId);
-    if (fromLog?.user_avatar) return fromLog.user_avatar;
-    return `https://cdn.discordapp.com/embed/avatars/${Number(userId) % 5}.png`;
+function resolveUserAvatar (userId) {
+  if (!userId) return 'https://cdn.discordapp.com/embed/avatars/0.png'
+  const cached = client.users.cache.get(userId)
+  if (cached) return cached.displayAvatarURL({ size: 64 })
+  const fromLog = db
+    .prepare(
+      'SELECT user_id, user_avatar FROM audit_logs WHERE user_id = ? AND user_avatar IS NOT NULL ORDER BY timestamp DESC LIMIT 1'
+    )
+    .get(userId)
+  if (fromLog?.user_avatar) return fromLog.user_avatar
+  return `https://cdn.discordapp.com/embed/avatars/${Number(userId) % 5}.png`
 }
 
 // --- PASSPORT / OAUTH2 CONFIG ---
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
+passport.serializeUser((user, done) => done(null, user))
+passport.deserializeUser((obj, done) => done(null, obj))
 
 passport.use(
   new Strategy(
@@ -606,100 +757,113 @@ passport.use(
       clientID: process.env.CLIENT_ID,
       clientSecret: process.env.CLIENT_SECRET,
       callbackURL: process.env.REDIRECT_URI,
-      scope: ["identify", "guilds", "guilds.members.read"],
+      scope: ['identify', 'guilds', 'guilds.members.read']
     },
     (accessToken, refreshToken, profile, done) => {
-      process.nextTick(() => done(null, profile));
+      process.nextTick(() => done(null, profile))
     }
   )
-);
+)
 
 app.use(
   session({
-    store: new SQLiteStore({ db: "database.db", table: "sessions", dir: "./" }),
-    secret: process.env.SESSION_SECRET || "keyboard cat",
+    store: new SQLiteStore({ db: 'database.db', table: 'sessions', dir: './' }),
+    secret: process.env.SESSION_SECRET || 'keyboard cat',
     resave: false,
     saveUninitialized: false,
-    cookie: { 
+    cookie: {
       maxAge: 7 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax'
-    },
+    }
   })
-);
+)
 
-app.use(passport.initialize());
-app.use(cookieParser());
+app.use(passport.initialize())
+app.use(cookieParser())
 
-const rateLimit = require('express-rate-limit');
-app.use('/auth', rateLimit({
+const rateLimit = require('express-rate-limit')
+app.use(
+  '/auth',
+  rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 20,
     message: 'Too many auth attempts, try again later.'
-}));
-app.use('/admin/login', rateLimit({
+  })
+)
+app.use(
+  '/admin/login',
+  rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
     message: 'Too many admin login attempts.'
-}));
+  })
+)
 
-app.use(express.json({ limit: '50kb' }));
-app.use(express.urlencoded({ extended: true, limit: '50kb' }));
-app.use(passport.session());
+app.use(express.json({ limit: '50kb' }))
+app.use(express.urlencoded({ extended: true, limit: '50kb' }))
+app.use(passport.session())
 
-const adminSessions = new Map();
-function getAdminSession(req) {
-    const token = req.cookies?.admin_token;
-    if (!token) return null;
-    const session = adminSessions.get(token);
-    if (!session) return null;
-    if (Date.now() > session.expires) {
-        adminSessions.delete(token);
-        return null;
-    }
-    session.expires = Date.now() + 2 * 60 * 60 * 1000; // refresh on activity
-    return session;
+const adminSessions = new Map()
+function getAdminSession (req) {
+  const token = req.cookies?.admin_token
+  if (!token) return null
+  const session = adminSessions.get(token)
+  if (!session) return null
+  if (Date.now() > session.expires) {
+    adminSessions.delete(token)
+    return null
+  }
+  session.expires = Date.now() + 2 * 60 * 60 * 1000 // refresh on activity
+  return session
 }
 
-function requireAdmin(req, res, next) {
-    // Layer 2: Must be logged in via Discord OAuth
-    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    
-    // Layer 2: Must be your specific Discord account
-    if (req.user.id !== process.env.ADMIN_DISCORD_ID) {
-        return res.status(403).send(getErrorPage(
-            "Access Denied",
-            "This area is restricted to authorized personnel only.",
-            "403"
-        ));
-    }
+function requireAdmin (req, res, next) {
+  // Layer 2: Must be logged in via Discord OAuth
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    // Layer 3: Must have active admin session token
-    const adminSession = getAdminSession(req);
-    if (!adminSession) return res.redirect('/admin/login');
+  // Layer 2: Must be your specific Discord account
+  if (req.user.id !== process.env.ADMIN_DISCORD_ID) {
+    return res
+      .status(403)
+      .send(
+        getErrorPage(
+          'Access Denied',
+          'This area is restricted to authorized personnel only.',
+          '403'
+        )
+      )
+  }
 
-    next();
+  // Layer 3: Must have active admin session token
+  const adminSession = getAdminSession(req)
+  if (!adminSession) return res.redirect('/admin/login')
+
+  next()
 }
 
 // --- ROUTES ---
-app.get("/auth/discord", passport.authenticate("discord"));
+app.get('/auth/discord', passport.authenticate('discord'))
 app.get(
-  "/auth/discord/callback",
-  passport.authenticate("discord", { failureRedirect: "/" }),
-  (req, res) => res.redirect("/")
-);
-app.get("/logout", (req, res) => {
-  req.logout(() => res.redirect("/"));
-});
+  '/auth/discord/callback',
+  passport.authenticate('discord', { failureRedirect: '/' }),
+  (req, res) => res.redirect('/')
+)
+app.get('/logout', (req, res) => {
+  req.logout(() => res.redirect('/'))
+})
 
 // HELPER: Shared Header/Favicon HTML
-const getHead = (title) => `
+const getHead = title => `
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"> 
         <title>${title}</title>
-        <link rel="icon" type="image/png" href="${client.user?.displayAvatarURL() || 'https://cdn.discordapp.com/embed/avatars/0.png'}">
+        <link rel="icon" type="image/png" href="${
+          client.user?.displayAvatarURL() ||
+          'https://cdn.discordapp.com/embed/avatars/0.png'
+        }">
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=JetBrains+Mono&display=swap');
@@ -714,76 +878,76 @@ const getHead = (title) => `
             .no-scrollbar::-webkit-scrollbar { display: none; }
         </style>
     </head>
-`;
+`
 
-async function canManageSnippet(req, guild_id) {
+async function canManageSnippet (req, guild_id) {
   try {
-    let guild = client.guilds.cache.get(guild_id);
-    if (!guild) guild = await client.guilds.fetch(guild_id);
+    let guild = client.guilds.cache.get(guild_id)
+    if (!guild) guild = await client.guilds.fetch(guild_id)
 
-    const member = await guild.members.fetch(req.user.id);
-    const settings = getSettings(guild_id);
+    const member = await guild.members.fetch(req.user.id)
+    const settings = getSettings(guild_id)
     return (
       member.permissions.has(PermissionFlagsBits.Administrator) ||
       hasHelperRole(member, settings)
-    );
+    )
   } catch (e) {
-    return false;
+    return false
   }
 }
 
-const getActionColor = (action) => {
+const getActionColor = action => {
   const colors = {
-    SNIPPET_CREATE: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    SNIPPET_UPDATE: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    SNIPPET_DELETE: "bg-rose-500/10 text-rose-400 border-rose-500/20",
-    SNIPPET: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    LOCK: "bg-amber-500/10 text-amber-500 border-amber-500/20",
-    CANCEL: "bg-orange-500/10 text-orange-500 border-orange-500/20",
-    GREET: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
-    DUPLICATE: "bg-sky-500/10 text-sky-500 border-sky-500/20",
-    SETUP: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
-    RESOLVED: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
-    ANSWERED: "bg-green-500/10 text-green-500 border-green-500/20",
-    AUTO_CLOSE: "bg-gray-500/10 text-gray-500 border-gray-500/20",
-    STALE_WARNING: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
-    THREAD_RENEWED: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
-    LINK_ADDED: "bg-blue-600/10 text-blue-600 border-blue-600/20",
-    LINK_ACCESSED: "bg-purple-500/10 text-purple-500 border-purple-500/20",
-    LINK_REMOVED: "bg-red-500/10 text-red-500 border-red-500/20",
-    TRIGGER_CREATE: "bg-pink-500/10 text-pink-400 border-pink-500/20",
-    USER_BLOCKED: "bg-red-600/10 text-red-400 border-red-600/20",
-    USER_UNBLOCKED: "bg-teal-500/10 text-teal-400 border-teal-500/20",
-    USER_BANNED: "bg-red-900/20 text-red-300 border-red-900/30",
-    USER_UNBANNED: "bg-teal-600/10 text-teal-300 border-teal-600/20",
-    AUTO_SUSPEND: "bg-orange-500/10 text-orange-400 border-orange-500/20",
-    BULK_CLOSE: "bg-slate-500/10 text-slate-300 border-slate-500/20",
-    MANUAL_SUSPEND: "bg-orange-600/10 text-orange-300 border-orange-600/20",
-    ESCALATION: "bg-red-500/10 text-red-400 border-red-500/20",
-  };
-  return colors[action] || "bg-slate-800 text-slate-400 border-slate-700";
-};
-
-function getManagedGuilds(userId) {
-  return client.guilds.cache
-    .filter((guild) => {
-      const member = guild.members.cache.get(userId);
-      if (!member) return false;
-
-      const settings = getSettings(guild.id);
-      const isHandler = hasHelperRole(member, settings);
-      const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
-
-      return isHandler || isAdmin;
-    })
-    .map((guild) => guild.id);
+    SNIPPET_CREATE: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    SNIPPET_UPDATE: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    SNIPPET_DELETE: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+    SNIPPET: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    LOCK: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
+    CANCEL: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+    GREET: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+    DUPLICATE: 'bg-sky-500/10 text-sky-500 border-sky-500/20',
+    SETUP: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+    RESOLVED: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+    ANSWERED: 'bg-green-500/10 text-green-500 border-green-500/20',
+    AUTO_CLOSE: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+    STALE_WARNING: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+    THREAD_RENEWED: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
+    LINK_ADDED: 'bg-blue-600/10 text-blue-600 border-blue-600/20',
+    LINK_ACCESSED: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
+    LINK_REMOVED: 'bg-red-500/10 text-red-500 border-red-500/20',
+    TRIGGER_CREATE: 'bg-pink-500/10 text-pink-400 border-pink-500/20',
+    USER_BLOCKED: 'bg-red-600/10 text-red-400 border-red-600/20',
+    USER_UNBLOCKED: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
+    USER_BANNED: 'bg-red-900/20 text-red-300 border-red-900/30',
+    USER_UNBANNED: 'bg-teal-600/10 text-teal-300 border-teal-600/20',
+    AUTO_SUSPEND: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+    BULK_CLOSE: 'bg-slate-500/10 text-slate-300 border-slate-500/20',
+    MANUAL_SUSPEND: 'bg-orange-600/10 text-orange-300 border-orange-600/20',
+    ESCALATION: 'bg-red-500/10 text-red-400 border-red-500/20'
+  }
+  return colors[action] || 'bg-slate-800 text-slate-400 border-slate-700'
 }
 
-app.get("/", async (req, res) => {
+function getManagedGuilds (userId) {
+  return client.guilds.cache
+    .filter(guild => {
+      const member = guild.members.cache.get(userId)
+      if (!member) return false
+
+      const settings = getSettings(guild.id)
+      const isHandler = hasHelperRole(member, settings)
+      const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator)
+
+      return isHandler || isAdmin
+    })
+    .map(guild => guild.id)
+}
+
+app.get('/', async (req, res) => {
   if (!req.isAuthenticated()) {
     return res.send(`
         <html>
-        ${getHead("Impulse | Terminal Access")}
+        ${getHead('Impulse | Terminal Access')}
         <body class="bg-[#0b0f1a] text-white flex items-center justify-center min-h-screen p-6">
             <div class="max-w-md w-full">
                 <div class="text-center mb-8">
@@ -824,81 +988,106 @@ app.get("/", async (req, res) => {
                     <p class="text-[9px] text-center text-slate-600 mt-6 uppercase tracking-widest italic font-bold">Authorized personnel only</p>
                 </div>
             </div>
-        </body></html>`);
+        </body></html>`)
   }
 
-  const botAvatar = client.user.displayAvatarURL();
-  const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
-  const authorizedGuilds = [];
+  const botAvatar = client.user.displayAvatarURL()
+  const allSettings = db.prepare(`SELECT * FROM guild_settings`).all()
+  const authorizedGuilds = []
 
   for (const settings of allSettings) {
-    const guild = client.guilds.cache.get(settings.guild_id);
-    if (!guild) continue;
+    const guild = client.guilds.cache.get(settings.guild_id)
+    if (!guild) continue
     try {
-      const member = await guild.members.fetch(req.user.id);
+      const member = await guild.members.fetch(req.user.id)
       if (
         member.permissions.has(PermissionFlagsBits.Administrator) ||
         hasHelperRole(member, settings)
       ) {
         const timers = db
           .prepare(
-            "SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?"
+            'SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?'
           )
-          .all(settings.guild_id);
+          .all(settings.guild_id)
         const snippetCount = db
-          .prepare("SELECT COUNT(*) as count FROM snippets WHERE guild_id = ?")
-          .get(settings.guild_id).count;
-        authorizedGuilds.push({ ...settings, timers, snippetCount });
+          .prepare('SELECT COUNT(*) as count FROM snippets WHERE guild_id = ?')
+          .get(settings.guild_id).count
+        authorizedGuilds.push({ ...settings, timers, snippetCount })
       }
     } catch (e) {}
   }
 
   // Scope all activity and stats to only the guilds this user can access
-  const authorizedGuildIds = authorizedGuilds.map(g => g.guild_id);
+  const authorizedGuildIds = authorizedGuilds.map(g => g.guild_id)
 
-  const recentLogs = authorizedGuildIds.length > 0
-    ? db.prepare(
-        `SELECT audit_logs.*, guild_settings.guild_name 
+  const recentLogs =
+    authorizedGuildIds.length > 0
+      ? db
+          .prepare(
+            `SELECT audit_logs.*, guild_settings.guild_name 
          FROM audit_logs 
          LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
-         WHERE audit_logs.guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})
+         WHERE audit_logs.guild_id IN (${authorizedGuildIds
+           .map(() => '?')
+           .join(',')})
          ORDER BY timestamp DESC LIMIT 5`
-      ).all(...authorizedGuildIds)
-    : [];
+          )
+          .all(...authorizedGuildIds)
+      : []
 
-  const totalSnippets = authorizedGuildIds.length > 0
-    ? db.prepare(`SELECT COUNT(*) as count FROM snippets WHERE guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})`)
-        .get(...authorizedGuildIds).count
-    : 0;
-  const totalLocks = authorizedGuildIds.length > 0
-    ? db.prepare(`SELECT COUNT(*) as count FROM pending_locks WHERE guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})`)
-        .get(...authorizedGuildIds).count
-    : 0;
-  const totalLogs = authorizedGuildIds.length > 0
-    ? db.prepare(`SELECT COUNT(*) as count FROM audit_logs WHERE guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})`)
-        .get(...authorizedGuildIds).count
-    : 0;
+  const totalSnippets =
+    authorizedGuildIds.length > 0
+      ? db
+          .prepare(
+            `SELECT COUNT(*) as count FROM snippets WHERE guild_id IN (${authorizedGuildIds
+              .map(() => '?')
+              .join(',')})`
+          )
+          .get(...authorizedGuildIds).count
+      : 0
+  const totalLocks =
+    authorizedGuildIds.length > 0
+      ? db
+          .prepare(
+            `SELECT COUNT(*) as count FROM pending_locks WHERE guild_id IN (${authorizedGuildIds
+              .map(() => '?')
+              .join(',')})`
+          )
+          .get(...authorizedGuildIds).count
+      : 0
+  const totalLogs =
+    authorizedGuildIds.length > 0
+      ? db
+          .prepare(
+            `SELECT COUNT(*) as count FROM audit_logs WHERE guild_id IN (${authorizedGuildIds
+              .map(() => '?')
+              .join(',')})`
+          )
+          .get(...authorizedGuildIds).count
+      : 0
 
   // User is logged in but has no server access — show invite page
   if (authorizedGuildIds.length === 0) {
-    const botAvatar = client.user.displayAvatarURL();
-    const uptimeSeconds = process.uptime();
-    const d = Math.floor(uptimeSeconds / 86400);
-    const h = Math.floor((uptimeSeconds % 86400) / 3600);
-    const m = Math.floor((uptimeSeconds % 3600) / 60);
+    const botAvatar = client.user.displayAvatarURL()
+    const uptimeSeconds = process.uptime()
+    const d = Math.floor(uptimeSeconds / 86400)
+    const h = Math.floor((uptimeSeconds % 86400) / 3600)
+    const m = Math.floor((uptimeSeconds % 3600) / 60)
     return res.send(`
       <html>
-      ${getHead("Impulse | No Server Access")}
+      ${getHead('Impulse | No Server Access')}
       <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
       <div class="max-w-3xl mx-auto">
-          ${getNav("overview", req.user)}
+          ${getNav('overview', req.user)}
           <div class="text-center py-16">
               <div class="inline-block relative mb-8">
                   <div class="absolute inset-0 bg-[#FFAA00] blur-2xl opacity-20 rounded-full"></div>
                   <img src="${botAvatar}" class="w-20 h-20 rounded-2xl border-2 border-[#FFAA00]/30 relative z-10">
               </div>
               <h1 class="text-3xl font-black text-white uppercase tracking-tighter mb-2">
-                  Welcome, <span class="text-[#FFAA00]">${sanitize(req.user.username)}</span>
+                  Welcome, <span class="text-[#FFAA00]">${sanitize(
+                    req.user.username
+                  )}</span>
               </h1>
               <p class="text-slate-500 text-sm mb-8">You're not an admin or helper in any server where Impulse is set up yet.</p>
 
@@ -912,7 +1101,9 @@ app.get("/", async (req, res) => {
                   </div>
                   <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
                       <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Uptime</p>
-                      <p class="text-sm font-bold text-white">${d > 0 ? d + 'd ' : ''}${h}h ${m}m</p>
+                      <p class="text-sm font-bold text-white">${
+                        d > 0 ? d + 'd ' : ''
+                      }${h}h ${m}m</p>
                   </div>
                   <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
                       <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Version</p>
@@ -922,7 +1113,9 @@ app.get("/", async (req, res) => {
 
               <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10 text-left">
                   <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 text-center">
-                      <p class="text-3xl font-black text-white mb-1">${client.guilds.cache.size}</p>
+                      <p class="text-3xl font-black text-white mb-1">${
+                        client.guilds.cache.size
+                      }</p>
                       <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Active Servers</p>
                   </div>
                   <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 text-center">
@@ -930,7 +1123,10 @@ app.get("/", async (req, res) => {
                       <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Cached Users</p>
                   </div>
                   <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 text-center">
-                      <p class="text-3xl font-black text-white mb-1">${db.prepare("SELECT COUNT(*) as c FROM audit_logs").get().c.toLocaleString()}</p>
+                      <p class="text-3xl font-black text-white mb-1">${db
+                        .prepare('SELECT COUNT(*) as c FROM audit_logs')
+                        .get()
+                        .c.toLocaleString()}</p>
                       <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Total Events Logged</p>
                   </div>
               </div>
@@ -946,15 +1142,15 @@ app.get("/", async (req, res) => {
           </div>
       </div>
       </body></html>
-    `);
+    `)
   }
 
   res.send(`
     <html>
-    ${getHead("Impulse | Dashboard Overview")}
+    ${getHead('Impulse | Dashboard Overview')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-4 md:p-8">
         <div class="max-w-6xl mx-auto">
-            ${getNav("overview", req.user)}
+            ${getNav('overview', req.user)}
 
             <div class="mb-10">
                 <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
@@ -1011,12 +1207,12 @@ app.get("/", async (req, res) => {
                     ${authorizedGuilds
                       .slice(0, 6)
                       .map(
-                        (s) => `
+                        s => `
                         <div class="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition shadow-lg">
                             <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-[#FFAA00] uppercase text-[10px] font-black tracking-widest opacity-80 truncate flex-1">${
-                                  sanitize(s.guild_name)
-                                }</h3>
+                                <h3 class="text-[#FFAA00] uppercase text-[10px] font-black tracking-widest opacity-80 truncate flex-1">${sanitize(
+                                  s.guild_name
+                                )}</h3>
                                 <span class="text-[8px] bg-slate-800 px-2 py-1 rounded text-slate-500 font-bold">${
                                   s.snippetCount
                                 } SNIPPETS</span>
@@ -1026,25 +1222,24 @@ app.get("/", async (req, res) => {
                                   s.timers.length > 0
                                     ? s.timers
                                         .slice(0, 3)
-                                        .map(
-                                          (t) => `
-                                    <div class="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-slate-800/50">
-                                        <span class="text-[10px] mono text-slate-500">ID:${t.thread_id.slice(
-                                          -5
-                                        )}</span>
-                                        <span class="text-xs font-bold text-emerald-400 mono" data-expire="${
-                                          t.lock_at
-                                        }">--:--</span>
-                                    </div>
-                                `
-                                        )
+                                        .map((t) => {
+                                            const threadName = getReadableName(t.thread_id, s.guild_id);
+                                            return `
+                                            <div class="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-slate-800/50">
+                                                <div class="flex flex-col">
+                                                    <span class="text-[10px] font-bold text-white truncate max-w-[100px]">${sanitize(threadName)}</span>
+                                                    <span class="text-[8px] mono text-slate-600">ID: ${t.thread_id.slice(-5)}</span>
+                                                </div>
+                                                <span class="text-xs font-bold text-emerald-400 mono" data-expire="${t.lock_at}">--:--</span>
+                                            </div>
+                                        `})
                                         .join("")
                                     : '<div class="text-slate-600 text-xs py-2 italic text-center">No active timers</div>'
                                 }
                             </div>
                         </div>`
                       )
-                      .join("")}
+                      .join('')}
                 </div>
             </div>
 
@@ -1059,7 +1254,7 @@ app.get("/", async (req, res) => {
                 </div>
                 <div class="divide-y divide-slate-800/40">
                     ${recentLogs
-                      .map((l) => {
+                      .map(l => {
                         return `
                         <div class="p-4 hover:bg-[#FFAA00]/5 transition flex items-center gap-4">
                             <div class="hidden md:block text-[10px] mono text-slate-600 w-20 text-right shrink-0" data-timestamp="${
@@ -1080,12 +1275,12 @@ app.get("/", async (req, res) => {
                                 }</p>
                             </div>
                             <div class="text-[9px] font-black text-slate-600 uppercase tracking-widest shrink-0 w-24 text-right">
-                                ${l.guild_name || "System"}
+                                ${l.guild_name || 'System'}
                             </div>
                         </div>
-                    `;
+                    `
                       })
-                      .join("")}
+                      .join('')}
                 </div>
                 <div class="p-4 bg-slate-900/20 text-center">
                     <p class="text-[10px] text-slate-600 font-mono">Total Events: ${totalLogs.toLocaleString()}</p>
@@ -1127,19 +1322,35 @@ app.get("/", async (req, res) => {
                         <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-4">System Specs</p>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                             <div>
-                                <p class="text-lg font-black text-white">${client.guilds.cache.size}</p>
+                                <p class="text-lg font-black text-white">${
+                                  client.guilds.cache.size
+                                }</p>
                                 <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Servers</p>
                             </div>
                             <div>
-                                <p class="text-lg font-black text-white">${client.users.cache.size}</p>
+                                <p class="text-lg font-black text-white">${
+                                  client.users.cache.size
+                                }</p>
                                 <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Cached Users</p>
                             </div>
                             <div>
-                                <p class="text-lg font-black text-white">${db.prepare("SELECT COUNT(*) as c FROM blocked_users").get().c}</p>
+                                <p class="text-lg font-black text-white">${
+                                  db
+                                    .prepare(
+                                      'SELECT COUNT(*) as c FROM blocked_users'
+                                    )
+                                    .get().c
+                                }</p>
                                 <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Blocked Users</p>
                             </div>
                             <div>
-                                <p class="text-lg font-black text-white">${db.prepare("SELECT COUNT(*) as c FROM banned_users").get().c}</p>
+                                <p class="text-lg font-black text-white">${
+                                  db
+                                    .prepare(
+                                      'SELECT COUNT(*) as c FROM banned_users'
+                                    )
+                                    .get().c
+                                }</p>
                                 <p class="text-[9px] text-slate-600 uppercase font-bold tracking-wider">Banned Users</p>
                             </div>
                         </div>
@@ -1226,62 +1437,62 @@ app.get("/", async (req, res) => {
             updateTimers();
             updateTimestamps();
         </script>
-    </body></html>`);
-});
+    </body></html>`)
+})
 
-app.get("/logs", async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/logs', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-  const filterActions = [].concat(req.query.action || []);
-  const filterGuilds = [].concat(req.query.guild || []);
-  const filterUsers = [].concat(req.query.user || []);
+  const filterActions = [].concat(req.query.action || [])
+  const filterGuilds = [].concat(req.query.guild || [])
+  const filterUsers = [].concat(req.query.user || [])
 
-  const managedGuildIds = getManagedGuilds(req.user.id);
+  const managedGuildIds = getManagedGuilds(req.user.id)
 
   if (managedGuildIds.length === 0) {
     return res.send(
       getErrorPage(
-        "No Access",
+        'No Access',
         "You don't have permission to view logs from any servers."
       )
-    );
+    )
   }
 
   let query = `SELECT * FROM audit_logs WHERE guild_id IN (${managedGuildIds
-    .map(() => "?")
-    .join(",")})`;
-  let params = [...managedGuildIds];
+    .map(() => '?')
+    .join(',')})`
+  let params = [...managedGuildIds]
 
   if (filterActions.length > 0) {
-    query += ` AND action IN (${filterActions.map(() => "?").join(",")})`;
-    params.push(...filterActions);
+    query += ` AND action IN (${filterActions.map(() => '?').join(',')})`
+    params.push(...filterActions)
   }
 
   if (filterGuilds.length > 0) {
-    query += ` AND guild_id IN (${filterGuilds.map(() => "?").join(",")})`;
-    params.push(...filterGuilds);
+    query += ` AND guild_id IN (${filterGuilds.map(() => '?').join(',')})`
+    params.push(...filterGuilds)
   }
 
   if (filterUsers.length > 0) {
-    query += ` AND user_id IN (${filterUsers.map(() => "?").join(",")})`;
-    params.push(...filterUsers);
+    query += ` AND user_id IN (${filterUsers.map(() => '?').join(',')})`
+    params.push(...filterUsers)
   }
 
-  query += " ORDER BY timestamp DESC LIMIT 100";
+  query += ' ORDER BY timestamp DESC LIMIT 100'
 
-  const rawLogs = db.prepare(query).all(...params);
+  const rawLogs = db.prepare(query).all(...params)
 
-  const logs = rawLogs.map((log) => {
-    const guild = client.guilds.cache.get(log.guild_id);
-    let contextLink = null;
-    let readableContext = null;
+  const logs = rawLogs.map(log => {
+    const guild = client.guilds.cache.get(log.guild_id)
+    let contextLink = null
+    let readableContext = null
 
     if (log.thread_id && log.message_id) {
-      contextLink = getDiscordLink(log.guild_id, log.thread_id, log.message_id);
-      readableContext = getReadableName(log.thread_id, log.guild_id);
+      contextLink = getDiscordLink(log.guild_id, log.thread_id, log.message_id)
+      readableContext = getReadableName(log.thread_id, log.guild_id)
     } else if (log.thread_id) {
-      contextLink = getDiscordLink(log.guild_id, log.thread_id);
-      readableContext = getReadableName(log.thread_id, log.guild_id);
+      contextLink = getDiscordLink(log.guild_id, log.thread_id)
+      readableContext = getReadableName(log.thread_id, log.guild_id)
     }
 
     return {
@@ -1289,61 +1500,61 @@ app.get("/logs", async (req, res) => {
       displayName: guild ? guild.name : `Server ${log.guild_id.slice(-4)}`,
       contextLink,
       readableContext,
-      actionStyle: getActionColor(log.action),
-    };
-  });
+      actionStyle: getActionColor(log.action)
+    }
+  })
 
   const allActions = [
-    "SNIPPET_CREATE",
-    "SNIPPET_UPDATE",
-    "SNIPPET_DELETE",
-    "SNIPPET",
-    "LOCK",
-    "CANCEL",
-    "GREET",
-    "DUPLICATE",
-    "SETUP",
-    "RESOLVED",
-    "ANSWERED",
-    "AUTO_CLOSE",
-    "STALE_WARNING",
-    "THREAD_RENEWED",
-    "LINK_ADDED",
-    "LINK_ACCESSED",
-    "LINK_REMOVED",
-    "TRIGGER_CREATE",
-    "USER_BLOCKED",
-    "USER_UNBLOCKED",
-    "USER_BANNED",
-    "USER_UNBANNED",
-    "AUTO_SUSPEND",
-    "BULK_CLOSE",
-    "ESCALATION",
-  ];
+    'SNIPPET_CREATE',
+    'SNIPPET_UPDATE',
+    'SNIPPET_DELETE',
+    'SNIPPET',
+    'LOCK',
+    'CANCEL',
+    'GREET',
+    'DUPLICATE',
+    'SETUP',
+    'RESOLVED',
+    'ANSWERED',
+    'AUTO_CLOSE',
+    'STALE_WARNING',
+    'THREAD_RENEWED',
+    'LINK_ADDED',
+    'LINK_ACCESSED',
+    'LINK_REMOVED',
+    'TRIGGER_CREATE',
+    'USER_BLOCKED',
+    'USER_UNBLOCKED',
+    'USER_BANNED',
+    'USER_UNBANNED',
+    'AUTO_SUSPEND',
+    'BULK_CLOSE',
+    'ESCALATION'
+  ]
 
-  const managedGuilds = managedGuildIds.map((id) => {
-    const guild = client.guilds.cache.get(id);
-    return { id, name: guild ? guild.name : `Server ${id.slice(-4)}` };
-  });
+  const managedGuilds = managedGuildIds.map(id => {
+    const guild = client.guilds.cache.get(id)
+    return { id, name: guild ? guild.name : `Server ${id.slice(-4)}` }
+  })
 
   const userList = db
     .prepare(
       `
     SELECT DISTINCT user_id, user_name 
     FROM audit_logs 
-    WHERE guild_id IN (${managedGuildIds.map(() => "?").join(",")}) 
+    WHERE guild_id IN (${managedGuildIds.map(() => '?').join(',')}) 
     AND user_id IS NOT NULL
     ORDER BY user_name ASC
 `
     )
-    .all(...managedGuildIds);
+    .all(...managedGuildIds)
 
   res.send(`
     <html>
-    ${getHead("Impulse | Audit Logs")}
+    ${getHead('Impulse | Audit Logs')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-7xl mx-auto">
-            ${getNav("logs", req.user)}
+            ${getNav('logs', req.user)}
 
             <div class="mb-8">
                 <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
@@ -1360,37 +1571,37 @@ app.get("/logs", async (req, res) => {
         <div class="flex flex-wrap gap-2">
             <a href="/logs?${new URLSearchParams({
               guild: filterGuilds,
-              user: filterUsers,
+              user: filterUsers
             }).toString()}"
                class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
                  filterActions.length === 0
-                   ? "bg-[#FFAA00] text-black shadow-lg shadow-amber-500/30"
-                   : "bg-slate-800/70 text-slate-400 hover:bg-slate-700"
+                   ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/30'
+                   : 'bg-slate-800/70 text-slate-400 hover:bg-slate-700'
                } border border-slate-700">
                 All Actions
             </a>
             ${allActions
-              .map((act) => {
-                const active = filterActions.includes(act);
-                const params = new URLSearchParams();
+              .map(act => {
+                const active = filterActions.includes(act)
+                const params = new URLSearchParams()
                 const currentActions = active
-                  ? filterActions.filter((a) => a !== act)
-                  : [...filterActions, act];
-                currentActions.forEach((a) => params.append("action", a));
-                filterGuilds.forEach((g) => params.append("guild", g));
-                filterUsers.forEach((u) => params.append("user", u));
+                  ? filterActions.filter(a => a !== act)
+                  : [...filterActions, act]
+                currentActions.forEach(a => params.append('action', a))
+                filterGuilds.forEach(g => params.append('guild', g))
+                filterUsers.forEach(u => params.append('user', u))
 
                 return `
                 <a href="/logs?${params.toString()}"
                    class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
                      active
-                       ? "bg-[#FFAA00] text-black shadow-md shadow-amber-500/30"
-                       : "bg-slate-800/70 text-slate-400 hover:bg-slate-700"
+                       ? 'bg-[#FFAA00] text-black shadow-md shadow-amber-500/30'
+                       : 'bg-slate-800/70 text-slate-400 hover:bg-slate-700'
                    } border border-slate-700">
-                    ${act.replace(/_/g, " ")}
-                </a>`;
+                    ${act.replace(/_/g, ' ')}
+                </a>`
               })
-              .join("")}
+              .join('')}
         </div>
     </div>
 
@@ -1400,37 +1611,37 @@ app.get("/logs", async (req, res) => {
         <div class="flex flex-wrap gap-2">
             <a href="/logs?${new URLSearchParams({
               action: filterActions,
-              user: filterUsers,
+              user: filterUsers
             }).toString()}"
                class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
                  filterGuilds.length === 0
-                   ? "bg-[#FFAA00] text-black shadow-lg shadow-amber-500/30"
-                   : "bg-slate-800/70 text-slate-400 hover:bg-slate-700"
+                   ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/30'
+                   : 'bg-slate-800/70 text-slate-400 hover:bg-slate-700'
                } border border-slate-700">
                 All Servers
             </a>
             ${managedGuilds
-              .map((g) => {
-                const active = filterGuilds.includes(g.id);
-                const params = new URLSearchParams();
+              .map(g => {
+                const active = filterGuilds.includes(g.id)
+                const params = new URLSearchParams()
                 const currentGuilds = active
-                  ? filterGuilds.filter((id) => id !== g.id)
-                  : [...filterGuilds, g.id];
-                currentGuilds.forEach((id) => params.append("guild", id));
-                filterActions.forEach((a) => params.append("action", a));
-                filterUsers.forEach((u) => params.append("user", u));
+                  ? filterGuilds.filter(id => id !== g.id)
+                  : [...filterGuilds, g.id]
+                currentGuilds.forEach(id => params.append('guild', id))
+                filterActions.forEach(a => params.append('action', a))
+                filterUsers.forEach(u => params.append('user', u))
 
                 return `
                 <a href="/logs?${params.toString()}"
                    class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
                      active
-                       ? "bg-[#FFAA00] text-black shadow-md shadow-amber-500/30"
-                       : "bg-slate-800/70 text-slate-400 hover:bg-slate-700"
+                       ? 'bg-[#FFAA00] text-black shadow-md shadow-amber-500/30'
+                       : 'bg-slate-800/70 text-slate-400 hover:bg-slate-700'
                    } border border-slate-700">
                     ${g.name}
-                </a>`;
+                </a>`
               })
-              .join("")}
+              .join('')}
         </div>
     </div>
 
@@ -1440,39 +1651,39 @@ app.get("/logs", async (req, res) => {
         <div class="flex flex-wrap gap-2">
             <a href="/logs?${new URLSearchParams({
               action: filterActions,
-              guild: filterGuilds,
+              guild: filterGuilds
             }).toString()}"
                class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
                  filterUsers.length === 0
-                   ? "bg-[#FFAA00] text-black shadow-lg shadow-amber-500/30"
-                   : "bg-slate-800/70 text-slate-400 hover:bg-slate-700"
+                   ? 'bg-[#FFAA00] text-black shadow-lg shadow-amber-500/30'
+                   : 'bg-slate-800/70 text-slate-400 hover:bg-slate-700'
                } border border-slate-700">
                 All Users
             </a>
             ${
               userList.length > 0
                 ? userList
-                    .map((u) => {
-                      const active = filterUsers.includes(u.user_id);
-                      const params = new URLSearchParams();
+                    .map(u => {
+                      const active = filterUsers.includes(u.user_id)
+                      const params = new URLSearchParams()
                       const currentUsers = active
-                        ? filterUsers.filter((id) => id !== u.user_id)
-                        : [...filterUsers, u.user_id];
-                      currentUsers.forEach((id) => params.append("user", id));
-                      filterActions.forEach((a) => params.append("action", a));
-                      filterGuilds.forEach((g) => params.append("guild", g));
+                        ? filterUsers.filter(id => id !== u.user_id)
+                        : [...filterUsers, u.user_id]
+                      currentUsers.forEach(id => params.append('user', id))
+                      filterActions.forEach(a => params.append('action', a))
+                      filterGuilds.forEach(g => params.append('guild', g))
 
                       return `
                 <a href="/logs?${params.toString()}"
                    class="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
                      active
-                       ? "bg-purple-600/80 text-white shadow-md shadow-purple-500/30"
-                       : "bg-slate-800/70 text-slate-400 hover:bg-slate-700"
+                       ? 'bg-purple-600/80 text-white shadow-md shadow-purple-500/30'
+                       : 'bg-slate-800/70 text-slate-400 hover:bg-slate-700'
                    } border border-slate-700">
-                    @${u.user_name || "Unknown"}
-                </a>`;
+                    @${u.user_name || 'Unknown'}
+                </a>`
                     })
-                    .join("")
+                    .join('')
                 : `
                 <span class="px-3 py-1.5 text-[10px] text-slate-600 italic">No users found in logs yet</span>
             `
@@ -1495,34 +1706,34 @@ app.get("/logs", async (req, res) => {
             <div class="flex flex-wrap gap-2">
                 ${filterActions
                   .map(
-                    (a) =>
+                    a =>
                       `<span class="px-2.5 py-1 bg-blue-950/70 text-blue-300 text-[10px] rounded border border-blue-900/40">${a.replace(
                         /_/g,
-                        " "
+                        ' '
                       )}</span>`
                   )
-                  .join("")}
+                  .join('')}
                 ${filterGuilds
-                  .map((id) => {
-                    const g = managedGuilds.find((g) => g.id === id);
+                  .map(id => {
+                    const g = managedGuilds.find(g => g.id === id)
                     return g
                       ? `<span class="px-2.5 py-1 bg-amber-950/70 text-amber-300 text-[10px] rounded border border-amber-900/40">${g.name}</span>`
-                      : "";
+                      : ''
                   })
-                  .join("")}
+                  .join('')}
                 ${filterUsers
-                  .map((id) => {
-                    const u = userList.find((u) => u.user_id === id);
+                  .map(id => {
+                    const u = userList.find(u => u.user_id === id)
                     return u
                       ? `<span class="px-2.5 py-1 bg-purple-950/70 text-purple-300 text-[10px] rounded border border-purple-900/40">@${
-                          u.user_name || "unknown"
+                          u.user_name || 'unknown'
                         }</span>`
-                      : "";
+                      : ''
                   })
-                  .join("")}
+                  .join('')}
             </div>
         </div>`
-            : ""
+            : ''
         }
     </div>
 </div>
@@ -1544,27 +1755,27 @@ app.get("/logs", async (req, res) => {
                             ${
                               logs.length > 0
                                 ? logs
-                                    .map((l) => {
+                                    .map(l => {
                                       // Force SQLite UTC → browser local time
-                                      const iso = l.timestamp.includes(" ")
-                                        ? l.timestamp.replace(" ", "T") + "Z"
-                                        : l.timestamp;
+                                      const iso = l.timestamp.includes(' ')
+                                        ? l.timestamp.replace(' ', 'T') + 'Z'
+                                        : l.timestamp
 
-                                      const date = new Date(iso);
+                                      const date = new Date(iso)
 
                                       const formattedDate =
-                                        date.toLocaleDateString("en-US", {
-                                          month: "short",
-                                          day: "numeric",
-                                          year: "numeric",
-                                        });
+                                        date.toLocaleDateString('en-US', {
+                                          month: 'short',
+                                          day: 'numeric',
+                                          year: 'numeric'
+                                        })
                                       const formattedTime =
-                                        date.toLocaleTimeString("en-US", {
-                                          hour: "2-digit",
-                                          minute: "2-digit",
-                                          second: "2-digit",
-                                          hour12: false,
-                                        });
+                                        date.toLocaleTimeString('en-US', {
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                          second: '2-digit',
+                                          hour12: false
+                                        })
 
                                       return `
                                 <tr class="hover:bg-white/5 transition-colors">
@@ -1602,11 +1813,11 @@ app.get("/logs", async (req, res) => {
                                         <div class="flex items-center gap-2">
                                             <img src="${
                                               l.user_avatar ||
-                                              "https://cdn.discordapp.com/embed/avatars/0.png"
+                                              'https://cdn.discordapp.com/embed/avatars/0.png'
                                             }" 
                                                  class="w-6 h-6 rounded-full border border-slate-700">
                                             <span class="text-xs font-bold text-slate-300">${
-                                              l.user_name || "SYSTEM"
+                                              l.user_name || 'SYSTEM'
                                             }</span>
                                         </div>
                                     </td>
@@ -1623,15 +1834,15 @@ app.get("/logs", async (req, res) => {
                                             <div class="mt-3 p-3 bg-black/40 rounded-lg border border-slate-800 font-mono text-[10px] text-blue-400">
                                                 <span class="text-slate-600 mr-2">>_</span>${
                                                   l.command_used ||
-                                                  "N/A (Automated Event)"
+                                                  'N/A (Automated Event)'
                                                 }
                                             </div>
                                         </details>
                                     </td>
                                 </tr>
-                            `;
+                            `
                                     })
-                                    .join("")
+                                    .join('')
                                 : `
                                 <tr>
                                     <td colspan="6" class="p-8 text-center text-slate-500">
@@ -1653,51 +1864,51 @@ app.get("/logs", async (req, res) => {
 
             <div class="mt-6 text-center text-xs text-slate-600 font-mono">
                 Showing ${logs.length} ${
-    logs.length === 1 ? "entry" : "entries"
+    logs.length === 1 ? 'entry' : 'entries'
   } • Last updated: ${new Date().toLocaleTimeString()}
             </div>
         </div>
     </body>
     </html>
-    `);
-});
+    `)
+})
 
-app.get("/threads", async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/threads', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-  const allSettings = db.prepare(`SELECT * FROM guild_settings`).all();
-  const authorizedGuilds = [];
+  const allSettings = db.prepare(`SELECT * FROM guild_settings`).all()
+  const authorizedGuilds = []
 
   for (const settings of allSettings) {
-    const guild = client.guilds.cache.get(settings.guild_id);
-    if (!guild) continue;
+    const guild = client.guilds.cache.get(settings.guild_id)
+    if (!guild) continue
     try {
-      const member = await guild.members.fetch(req.user.id);
+      const member = await guild.members.fetch(req.user.id)
       if (
         member.permissions.has(PermissionFlagsBits.Administrator) ||
         hasHelperRole(member, settings)
       ) {
         const timers = db
           .prepare(
-            "SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?"
+            'SELECT thread_id, lock_at FROM pending_locks WHERE guild_id = ?'
           )
-          .all(settings.guild_id);
+          .all(settings.guild_id)
         const threadTracking = db
           .prepare(
-            "SELECT COUNT(*) as count FROM thread_tracking WHERE guild_id = ?"
+            'SELECT COUNT(*) as count FROM thread_tracking WHERE guild_id = ?'
           )
-          .get(settings.guild_id).count;
-        authorizedGuilds.push({ ...settings, timers, threadTracking });
+          .get(settings.guild_id).count
+        authorizedGuilds.push({ ...settings, timers, threadTracking })
       }
     } catch (e) {}
   }
 
   res.send(`
     <html>
-    ${getHead("Impulse | Thread Management")}
+    ${getHead('Impulse | Thread Management')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-6xl mx-auto">
-            ${getNav("threads", req.user)}
+            ${getNav('threads', req.user)}
 
             <div class="mb-10">
                 <h1 class="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-2">
@@ -1754,7 +1965,7 @@ app.get("/threads", async (req, res) => {
             <div class="space-y-6">
                 ${authorizedGuilds
                   .map(
-                    (s) => `
+                    s => `
                     <div class="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-800/50 overflow-hidden shadow-xl">
                         <div class="p-6 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/20">
                             <div>
@@ -1762,9 +1973,7 @@ app.get("/threads", async (req, res) => {
                                   s.guild_name
                                 }</h3>
                                 <div class="flex items-center gap-4 text-[10px] text-slate-500 uppercase font-bold tracking-wider">
-                                    <span>Forum: <span class="text-[#FFAA00]">#${s.forum_id.slice(
-                                      -4
-                                    )}</span></span>
+                                    <span>Forum: <span class="text-[#FFAA00]">#${sanitize(getReadableName(s.forum_id, s.guild_id))}</span></span>
                                     <span>•</span>
                                     <span>${
                                       s.timers.length
@@ -1776,10 +1985,10 @@ app.get("/threads", async (req, res) => {
                             <div class="flex items-center gap-2">
                                 <span class="text-[9px] px-3 py-1.5 rounded-lg ${
                                   s.timers.length > 0
-                                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                                    : "bg-slate-800 text-slate-500 border border-slate-700"
+                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                    : 'bg-slate-800 text-slate-500 border border-slate-700'
                                 } font-black uppercase">
-                                    ${s.timers.length > 0 ? "Active" : "Idle"}
+                                    ${s.timers.length > 0 ? 'Active' : 'Idle'}
                                 </span>
                             </div>
                         </div>
@@ -1792,7 +2001,7 @@ app.get("/threads", async (req, res) => {
                                 <div class="space-y-3">
                                     ${s.timers
                                       .map(
-                                        (t) => `
+                                        t => `
                                         <div class="flex items-center justify-between bg-black/40 p-4 rounded-xl border border-slate-800/50 hover:border-[#FFAA00]/30 transition">
                                             <div class="flex items-center gap-4">
                                                 <div class="bg-slate-800 px-3 py-2 rounded-lg">
@@ -1819,7 +2028,7 @@ app.get("/threads", async (req, res) => {
                                         </div>
                                     `
                                       )
-                                      .join("")}
+                                      .join('')}
                                 </div>
                             </div>
                         `
@@ -1847,7 +2056,7 @@ app.get("/threads", async (req, res) => {
                                     ${
                                       s.unanswered_tag
                                         ? `<span class="text-slate-500">Unanswered Tag: <code class="text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">${s.unanswered_tag}</code></span>`
-                                        : ""
+                                        : ''
                                     }
                                 </div>
                             </div>
@@ -1855,7 +2064,7 @@ app.get("/threads", async (req, res) => {
                     </div>
                 `
                   )
-                  .join("")}
+                  .join('')}
             </div>
 
             ${
@@ -1872,7 +2081,7 @@ app.get("/threads", async (req, res) => {
                     </a>
                 </div>
             `
-                : ""
+                : ''
             }
         </div>
 
@@ -1895,18 +2104,18 @@ app.get("/threads", async (req, res) => {
         </script>
     </body>
     </html>
-    `);
-});
+    `)
+})
 
-app.get("/invite", (req, res) => {
-  const permissions = "292057869376";
-  const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`;
+app.get('/invite', (req, res) => {
+  const permissions = '292057869376'
+  const inviteUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&permissions=${permissions}&scope=bot%20applications.commands`
 
-  const botAvatar = client.user?.displayAvatarURL() || '';
+  const botAvatar = client.user?.displayAvatarURL() || ''
 
   res.send(`
     <html>
-    ${getHead("Impulse OS | Authorization Protocol")}
+    ${getHead('Impulse OS | Authorization Protocol')}
     <body class="bg-[#0b0f1a] text-slate-200 min-h-screen py-12 px-6 overflow-x-hidden relative">
         <!-- Background Glow -->
         <div class="absolute inset-0 opacity-30 pointer-events-none">
@@ -2015,38 +2224,38 @@ app.get("/invite", (req, res) => {
         </div>
     </body>
     </html>
-  `);
-});
+  `)
+})
 
-app.get("/snippets", async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/snippets', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
   // 1. Get IDs of guilds where the user has permission
   const allowedGuildIds = db
     .prepare(`SELECT guild_id FROM guild_settings`)
     .all()
-    .map((g) => g.guild_id)
-    .filter((gid) => {
-      const guild = client.guilds.cache.get(gid);
-      if (!guild) return false;
-      const member = guild.members.cache.get(req.user.id);
+    .map(g => g.guild_id)
+    .filter(gid => {
+      const guild = client.guilds.cache.get(gid)
+      if (!guild) return false
+      const member = guild.members.cache.get(req.user.id)
       return (
         member &&
         (member.permissions.has(PermissionFlagsBits.Administrator) ||
           hasHelperRole(member, getSettings(gid)))
-      );
-    });
+      )
+    })
 
   // Handle case where user has no access to any servers
   if (allowedGuildIds.length === 0) {
     return res.send(
       `<html>${getHead(
-        "Snippets"
+        'Snippets'
       )} <body class="bg-[#0b0f1a] text-white p-8">${getNav(
-        "snippets",
+        'snippets',
         req.user
       )} <p>No snippets found or no server access.</p></body></html>`
-    );
+    )
   }
 
   // 2. Fetch snippets for those guilds
@@ -2054,18 +2263,18 @@ app.get("/snippets", async (req, res) => {
     .prepare(
       `
         SELECT * FROM snippets
-        WHERE guild_id IN (${allowedGuildIds.map(() => "?").join(",")})
+        WHERE guild_id IN (${allowedGuildIds.map(() => '?').join(',')})
         ORDER BY updated_at DESC
     `
     )
-    .all(...allowedGuildIds);
+    .all(...allowedGuildIds)
 
   res.send(`
     <html>
-    ${getHead("Impulse | Snippets")}
+    ${getHead('Impulse | Snippets')}
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-5xl mx-auto">
-            ${getNav("snippets", req.user)}
+            ${getNav('snippets', req.user)}
 
             <div class="flex justify-between items-center mb-6">
                 <h1 class="text-2xl font-black text-white uppercase">Snippets</h1>
@@ -2076,32 +2285,34 @@ app.get("/snippets", async (req, res) => {
 
             <div class="space-y-3">
                 ${snippets
-                  .map((s) => {
+                  .map(s => {
                     // Look up the guild name for better UI
-                    const guild = client.guilds.cache.get(s.guild_id);
+                    const guild = client.guilds.cache.get(s.guild_id)
                     return `
                     <div class="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
                         <div>
                             <div class="flex items-center gap-2">
-                                <p class="font-bold text-white">${sanitize(s.name)}</p>
+                                <p class="font-bold text-white">${sanitize(
+                                  s.name
+                                )}</p>
                                 <span class="text-[9px] bg-slate-800 px-2 py-0.5 rounded text-slate-500">${
-                                  guild ? guild.name : "Unknown Server"
+                                  guild ? guild.name : 'Unknown Server'
                                 }</span>
                             </div>
                             <p class="text-[10px] text-slate-500">ID: ${
                               s.created_by
                             }</p>
                             <p class="text-xs text-slate-400">${
-                              s.title || "No title"
+                              s.title || 'No title'
                             }</p>
                         </div>
                         <div class="flex items-center gap-3">
                             <a href="/snippets/toggle/${
                               s.id
                             }" class="text-[9px] uppercase font-black ${
-                      s.enabled ? "text-emerald-400" : "text-rose-500"
+                      s.enabled ? 'text-emerald-400' : 'text-rose-500'
                     } hover:underline">
-                                ${s.enabled ? "Enabled" : "Disabled"}
+                                ${s.enabled ? 'Enabled' : 'Disabled'}
                             </a>
                             <a href="/snippets/edit/${
                               s.id
@@ -2111,43 +2322,43 @@ app.get("/snippets", async (req, res) => {
                             }" class="text-xs text-rose-500 hover:underline" onclick="return confirm('Delete this snippet?')">Delete</a>
                         </div>
                     </div>
-                `;
+                `
                   })
-                  .join("")}
+                  .join('')}
             </div>
         </div>
     </body>
     </html>
-    `);
-});
+    `)
+})
 
-app.get("/snippets/new", (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/snippets/new', (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
   const guilds = db
     .prepare(`SELECT guild_id, guild_name FROM guild_settings`)
     .all()
-    .filter((g) => {
-      const guild = client.guilds.cache.get(g.guild_id);
-      if (!guild) return false;
-      const member = guild.members.cache.get(req.user.id);
+    .filter(g => {
+      const guild = client.guilds.cache.get(g.guild_id)
+      if (!guild) return false
+      const member = guild.members.cache.get(req.user.id)
       return (
         member &&
         (member.permissions.has(PermissionFlagsBits.Administrator) ||
           hasHelperRole(member, getSettings(g.guild_id)))
-      );
-    });
+      )
+    })
 
   res.send(`
     <html>
-    ${getHead("Impulse | Create Snippet")}
+    ${getHead('Impulse | Create Snippet')}
     <style>
         #preTitle:empty, #preDesc:empty, #preFooter:empty, #preImage:not([src]), #preThumb:not([src]) { display: none; }
         .markdown-hint { color: #5865F2; cursor: help; border-bottom: 1px dashed #5865F2; }
     </style>
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-7xl mx-auto">
-            ${getNav("snippets", req.user)}
+            ${getNav('snippets', req.user)}
             
             <div class="mb-8 flex justify-between items-end">
                 <div>
@@ -2167,10 +2378,10 @@ app.get("/snippets/new", (req, res) => {
                                 <option value="" disabled selected>Choose server...</option>
                                 ${guilds
                                   .map(
-                                    (g) =>
+                                    g =>
                                       `<option value="${g.guild_id}">${g.guild_name}</option>`
                                   )
-                                  .join("")}
+                                  .join('')}
                             </select>
                         </div>
                         <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
@@ -2257,7 +2468,7 @@ app.get("/snippets/new", (req, res) => {
                                     <span class="bg-[#5865F2] text-white text-[10px] px-1.5 py-0.5 rounded-[3px] font-bold uppercase">App</span>
                                     <span class="text-[#949ba4] text-[10px]">Today at ${new Date().toLocaleTimeString(
                                       [],
-                                      { hour: "2-digit", minute: "2-digit" }
+                                      { hour: '2-digit', minute: '2-digit' }
                                     )}</span>
                                 </div>
                                 
@@ -2304,8 +2515,12 @@ app.get("/snippets/new", (req, res) => {
                 if (!text) return "";
                 return text
                     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                    .replace(/{user}/g, \`<span class="text-[#5865F2] font-medium">@${sanitize(req.user.username)}</span>\`)
-                    .replace(/{username}/g, \`<span class="text-[#5865F2] font-medium">${sanitize(req.user.username)}</span>\`)
+                    .replace(/{user}/g, \`<span class="text-[#5865F2] font-medium">@${sanitize(
+                      req.user.username
+                    )}</span>\`)
+                    .replace(/{username}/g, \`<span class="text-[#5865F2] font-medium">${sanitize(
+                      req.user.username
+                    )}</span>\`)
                     .replace(/{server}/g, '<strong>This Server</strong>')
                     .replace(/{channel}/g, '<span class="text-[#5865F2] font-medium">#this-channel</span>')
                     .replace(/{thread_author}/g, '<span class="text-[#5865F2] font-medium">@ThreadAuthor</span>')
@@ -2354,17 +2569,74 @@ app.get("/snippets/new", (req, res) => {
         </script>
     </body>
     </html>
-    `);
-});
+    `)
+})
 
-app.post(
-  "/snippets/new",
-  async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.post('/snippets/new', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    const {
+  const {
+    guild_id,
+    name,
+    title,
+    description,
+    color,
+    footer,
+    url,
+    image_url,
+    thumbnail_url
+  } = req.body
+
+  try {
+    // --- SECURITY VALIDATION ---
+    const guild = client.guilds.cache.get(guild_id)
+    if (!guild)
+      return res.status(403).send('Forbidden: Bot is not in this server.')
+
+    const member = await guild.members.fetch(req.user.id).catch(() => null)
+    if (!member)
+      return res.status(403).send('Forbidden: You are not in this server.')
+
+    const isAuthorized =
+      member.permissions.has(PermissionFlagsBits.Administrator) ||
+      hasHelperRole(member, getSettings(guild_id))
+
+    if (!isAuthorized) {
+      return res
+        .status(403)
+        .send(
+          getErrorPage(
+            'Access Denied',
+            'Clearance Level: Administrator or Command Helper required for snippet creation.'
+          )
+        )
+    }
+
+    // --- DUPLICATE CHECK ---
+    const existing = db
+      .prepare(`SELECT id FROM snippets WHERE guild_id = ? AND name = ?`)
+      .get(guild_id, name.toLowerCase())
+    if (existing) {
+      return res.send(`<html>${getHead(
+        'Error'
+      )}<body class="bg-[#0b0f1a] text-white p-8">
+                <h1 class="text-xl font-bold">Duplicate Trigger Name!</h1>
+                <p>A snippet named "${name}" already exists for this server.</p>
+                <button onclick="window.history.back()" class="mt-4 bg-white text-black px-4 py-2 rounded">Go Back</button>
+            </body></html>`)
+    }
+
+    // --- DATABASE INSERT ---
+    db.prepare(
+      `
+            INSERT INTO snippets (
+                guild_id, name, title, description, color, footer, url, image_url, thumbnail_url, created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `
+    ).run(
       guild_id,
-      name,
+      name.toLowerCase(),
       title,
       description,
       color,
@@ -2372,124 +2644,66 @@ app.post(
       url,
       image_url,
       thumbnail_url,
-    } = req.body;
+      req.user.id
+    )
 
-    try {
-      // --- SECURITY VALIDATION ---
-      const guild = client.guilds.cache.get(guild_id);
-      if (!guild)
-        return res.status(403).send("Forbidden: Bot is not in this server.");
+    logAction(
+      guild_id,
+      'SNIPPET_CREATE',
+      `Created snippet: ${name}`,
+      req.user.id,
+      req.user.username,
+      `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
+      '/snippet',
+      null,
+      null
+    )
 
-      const member = await guild.members.fetch(req.user.id).catch(() => null);
-      if (!member)
-        return res.status(403).send("Forbidden: You are not in this server.");
-
-      const isAuthorized =
-        member.permissions.has(PermissionFlagsBits.Administrator) ||
-        hasHelperRole(member, getSettings(guild_id));
-
-      if (!isAuthorized) {
-        return res
-          .status(403)
-          .send(
-            getErrorPage(
-              "Access Denied",
-              "Clearance Level: Administrator or Command Helper required for snippet creation."
-            )
-          );
-      }
-
-      // --- DUPLICATE CHECK ---
-      const existing = db
-        .prepare(`SELECT id FROM snippets WHERE guild_id = ? AND name = ?`)
-        .get(guild_id, name.toLowerCase());
-      if (existing) {
-        return res.send(`<html>${getHead(
-          "Error"
-        )}<body class="bg-[#0b0f1a] text-white p-8">
-                <h1 class="text-xl font-bold">Duplicate Trigger Name!</h1>
-                <p>A snippet named "${name}" already exists for this server.</p>
-                <button onclick="window.history.back()" class="mt-4 bg-white text-black px-4 py-2 rounded">Go Back</button>
-            </body></html>`);
-      }
-
-      // --- DATABASE INSERT ---
-      db.prepare(
-        `
-            INSERT INTO snippets (
-                guild_id, name, title, description, color, footer, url, image_url, thumbnail_url, created_by
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `
-      ).run(
-        guild_id,
-        name.toLowerCase(),
-        title,
-        description,
-        color,
-        footer,
-        url,
-        image_url,
-        thumbnail_url,
-        req.user.id
-      );
-
-      logAction(
-        guild_id,
-        "SNIPPET_CREATE",
-        `Created snippet: ${name}`,
-        req.user.id,
-        req.user.username,
-        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-        "/snippet",
-        null,
-        null
-      );
-
-      res.redirect("/snippets");
-    } catch (err) {
-      console.error("Critical Post Error:", err);
-      res.status(500).send("Internal Server Error");
-    }
+    res.redirect('/snippets')
+  } catch (err) {
+    console.error('Critical Post Error:', err)
+    res.status(500).send('Internal Server Error')
   }
-);
+})
 
-app.get("/snippets/edit/:id", async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/snippets/edit/:id', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
   const snippet = db
     .prepare(`SELECT * FROM snippets WHERE id = ?`)
-    .get(req.params.id);
+    .get(req.params.id)
   if (!snippet)
     return res
       .status(404)
       .send(
         getErrorPage(
-          "Data Missing",
-          "The requested snippet ID could not be located in the database.",
-          "404"
+          'Data Missing',
+          'The requested snippet ID could not be located in the database.',
+          '404'
         )
-      );
+      )
   if (!(await canManageSnippet(req, snippet.guild_id)))
     return res
       .status(403)
       .send(
         getErrorPage(
-          "Access Denied",
+          'Access Denied',
           "You don't have the required permissions to manage snippets in this server."
         )
-      );
+      )
 
   res.send(`
     <html>
-    ${getHead("Impulse | Edit Snippet")}
+    ${getHead('Impulse | Edit Snippet')}
     <body class="bg-[#0b0f1a] text-slate-200 p-6">
         <div class="max-w-6xl mx-auto">
-            ${getNav("snippets", req.user)}
+            ${getNav('snippets', req.user)}
             
             <div class="mb-8">
                 <h1 class="text-3xl font-black text-white uppercase tracking-tighter text-[#FFAA00]">Edit Snippet</h1>
-                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying trigger: /snippet name:${sanitize(snippet.name)}</p>
+                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-1">Modifying trigger: /snippet name:${sanitize(
+                  snippet.name
+                )}</p>
             </div>
 
             <form id="editForm" method="POST" action="/snippets/edit/${
@@ -2506,27 +2720,27 @@ app.get("/snippets/edit/:id", async (req, res) => {
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
                         <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Embed Content</label>
                         <input id="inTitle" name="title" value="${
-                          snippet.title || ""
+                          snippet.title || ''
                         }" placeholder="Embed Title" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
                         <input id="inUrl" name="url" value="${
-                          snippet.url || ""
+                          snippet.url || ''
                         }" placeholder="Title Link (URL)" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
                         <textarea id="inDesc" name="description" placeholder="Description" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white h-48 focus:border-[#FFAA00] outline-none resize-none">${
-                          snippet.description || ""
+                          snippet.description || ''
                         }</textarea>
                     </div>
 
                     <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 space-y-4">
                         <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Assets & Footer</label>
                         <input id="inFooter" name="footer" value="${
-                          snippet.footer || ""
+                          snippet.footer || ''
                         }" placeholder="Footer Text" class="w-full bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white focus:border-[#FFAA00] outline-none">
                         <div class="grid grid-cols-2 gap-4">
                             <input id="inImage" name="image_url" value="${
-                              snippet.image_url || ""
+                              snippet.image_url || ''
                             }" placeholder="Main Image URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
                             <input id="inThumb" name="thumbnail_url" value="${
-                              snippet.thumbnail_url || ""
+                              snippet.thumbnail_url || ''
                             }" placeholder="Thumbnail URL" class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs text-white">
                         </div>
                     </div>
@@ -2548,7 +2762,7 @@ app.get("/snippets/edit/:id", async (req, res) => {
                                     <span class="bg-[#5865F2] text-white text-[10px] px-1.5 py-0.5 rounded-[3px] font-bold uppercase">App</span>
                                     <span class="text-[#949ba4] text-[10px]">Today at ${new Date().toLocaleTimeString(
                                       [],
-                                      { hour: "2-digit", minute: "2-digit" }
+                                      { hour: '2-digit', minute: '2-digit' }
                                     )}</span>
                                 </div>
                                 
@@ -2627,153 +2841,153 @@ app.get("/snippets/edit/:id", async (req, res) => {
 </script>
     </body>
     </html>
-    `);
-});
+    `)
+})
 
-app.post(
-  "/snippets/edit/:id",
-  async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.post('/snippets/edit/:id', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    const snippet = db
-      .prepare(`SELECT * FROM snippets WHERE id = ?`)
-      .get(req.params.id);
-    if (!snippet) return res.redirect("/snippets");
+  const snippet = db
+    .prepare(`SELECT * FROM snippets WHERE id = ?`)
+    .get(req.params.id)
+  if (!snippet) return res.redirect('/snippets')
 
-    if (!(await canManageSnippet(req, snippet.guild_id)))
-      return res
-        .status(403)
-        .send(
-          getErrorPage(
-            "Access Denied",
-            "System security prevents unauthorized modification of this snippet."
-          )
-        );
+  if (!(await canManageSnippet(req, snippet.guild_id)))
+    return res
+      .status(403)
+      .send(
+        getErrorPage(
+          'Access Denied',
+          'System security prevents unauthorized modification of this snippet.'
+        )
+      )
 
-    const {
-      name,
-      title,
-      description,
-      footer,
-      color,
-      url,
-      image_url,
-      thumbnail_url,
-    } = req.body;
+  const {
+    name,
+    title,
+    description,
+    footer,
+    color,
+    url,
+    image_url,
+    thumbnail_url
+  } = req.body
 
-    try {
-      db.prepare(
-        `
+  try {
+    db.prepare(
+      `
             UPDATE snippets 
             SET name = ?, title = ?, description = ?, footer = ?, color = ?, url = ?, image_url = ?, thumbnail_url = ?
             WHERE id = ?
         `
-      ).run(
-        name.toLowerCase(),
-        title,
-        description,
-        footer,
-        color || "#FFAA00",
-        url,
-        image_url,
-        thumbnail_url,
-        req.params.id
-      );
+    ).run(
+      name.toLowerCase(),
+      title,
+      description,
+      footer,
+      color || '#FFAA00',
+      url,
+      image_url,
+      thumbnail_url,
+      req.params.id
+    )
 
-      logAction(
-        snippet.guild_id,
-        "SNIPPET_UPDATE",
-        `Updated snippet: ${name}`,
-        req.user.id,
-        req.user.username,
-        `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
-        null,
-        null,
-        null
-      );
+    logAction(
+      snippet.guild_id,
+      'SNIPPET_UPDATE',
+      `Updated snippet: ${name}`,
+      req.user.id,
+      req.user.username,
+      `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
+      null,
+      null,
+      null
+    )
 
-      res.redirect("/snippets");
-    } catch (err) {
-      console.error(err);
-      res.status(500).send("Failed to update database.");
-    }
+    res.redirect('/snippets')
+  } catch (err) {
+    console.error(err)
+    res.status(500).send('Failed to update database.')
   }
-);
+})
 
-app.get("/snippets/delete/:id", async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/snippets/delete/:id', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
   const snippet = db
     .prepare(`SELECT * FROM snippets WHERE id = ?`)
-    .get(req.params.id);
-  if (!snippet) return res.redirect("/snippets");
+    .get(req.params.id)
+  if (!snippet) return res.redirect('/snippets')
 
   if (!(await canManageSnippet(req, snippet.guild_id))) {
     return res
       .status(403)
       .send(
         getErrorPage(
-          "Access Denied",
-          "Deletion sequence aborted. Required permissions not detected."
+          'Access Denied',
+          'Deletion sequence aborted. Required permissions not detected.'
         )
-      );
+      )
   }
 
-  db.prepare(`DELETE FROM snippets WHERE id = ?`).run(req.params.id);
+  db.prepare(`DELETE FROM snippets WHERE id = ?`).run(req.params.id)
 
   logAction(
     snippet.guild_id,
-    "SNIPPET_DELETE",
+    'SNIPPET_DELETE',
     `Deleted snippet: ${snippet.name}`,
     req.user.id,
     req.user.username,
     `https://cdn.discordapp.com/avatars/${req.user.id}/${req.user.avatar}.png`,
     null,
     null
-  );
+  )
 
-  res.redirect("/snippets");
-});
+  res.redirect('/snippets')
+})
 
-app.get("/snippets/toggle/:id", async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/snippets/toggle/:id', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
   const snippet = db
     .prepare(`SELECT * FROM snippets WHERE id = ?`)
-    .get(req.params.id);
+    .get(req.params.id)
   if (!snippet || !(await canManageSnippet(req, snippet.guild_id)))
-    return res.redirect("/snippets");
+    return res.redirect('/snippets')
 
   db.prepare(
     `
         UPDATE snippets SET enabled = NOT enabled WHERE id = ?
     `
-  ).run(snippet.id);
+  ).run(snippet.id)
 
-  res.redirect("/snippets");
-});
+  res.redirect('/snippets')
+})
 
-app.get("/fun", async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
-    
-    const managedGuilds = getManagedGuilds(req.user.id);
-    if (managedGuilds.length === 0) return res.send(getErrorPage("No Access", "Admin/Helper role required."));
+app.get('/fun', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    const selectedGuildId = req.query.guild || managedGuilds[0];
-    const settings = getSettings(selectedGuildId);
-    const triggers = db.prepare("SELECT * FROM reaction_triggers WHERE guild_id = ?").all(selectedGuildId);
-    const funEnabled = settings?.fun_features_enabled !== 0;
+  const managedGuilds = getManagedGuilds(req.user.id)
+  if (managedGuilds.length === 0)
+    return res.send(getErrorPage('No Access', 'Admin/Helper role required.'))
 
-    const guildNames = managedGuilds.map(id => {
-        const g = client.guilds.cache.get(id);
-        return { id, name: g ? g.name : id };
-    });
+  const selectedGuildId = req.query.guild || managedGuilds[0]
+  const settings = getSettings(selectedGuildId)
+  const triggers = db
+    .prepare('SELECT * FROM reaction_triggers WHERE guild_id = ?')
+    .all(selectedGuildId)
+  const funEnabled = settings?.fun_features_enabled !== 0
 
-    res.send(`
+  const guildNames = managedGuilds.map(id => {
+    const g = client.guilds.cache.get(id)
+    return { id, name: g ? g.name : id }
+  })
+
+  res.send(`
         <html>
-        ${getHead("Impulse | Fun Features")}
+        ${getHead('Impulse | Fun Features')}
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6">
             <div class="max-w-6xl mx-auto">
-                ${getNav("fun", req.user)}
+                ${getNav('fun', req.user)}
                 
                 <div class="flex items-center justify-between mb-8">
                     <div>
@@ -2781,75 +2995,119 @@ app.get("/fun", async (req, res) => {
                         <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Reaction Triggers & Auto-Replies</p>
                     </div>
                     <div class="flex items-center gap-3">
-                        ${guildNames.length > 1 ? `
+                        ${
+                          guildNames.length > 1
+                            ? `
                         <select onchange="window.location='/fun?guild='+this.value" class="bg-slate-900 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg outline-none focus:border-[#FFAA00]">
-                            ${guildNames.map(g => `<option value="${g.id}" ${g.id === selectedGuildId ? 'selected' : ''}>${g.name}</option>`).join('')}
-                        </select>` : `<span class="text-[10px] font-black text-slate-500 uppercase">${guildNames[0]?.name || 'Server'}</span>`}
+                            ${guildNames
+                              .map(
+                                g =>
+                                  `<option value="${g.id}" ${
+                                    g.id === selectedGuildId ? 'selected' : ''
+                                  }>${g.name}</option>`
+                              )
+                              .join('')}
+                        </select>`
+                            : `<span class="text-[10px] font-black text-slate-500 uppercase">${
+                                guildNames[0]?.name || 'Server'
+                              }</span>`
+                        }
                         <a href="/fun/toggle?guild=${selectedGuildId}" class="flex items-center gap-3 bg-slate-900/50 px-4 py-2 rounded-2xl border border-slate-800 cursor-pointer hover:border-[#FFAA00]/30 transition">
-                            <span class="text-[10px] font-black uppercase tracking-widest ${funEnabled ? 'text-emerald-400' : 'text-rose-500'}">
-                                ${funEnabled ? '● System Active' : '○ System Offline'}
+                            <span class="text-[10px] font-black uppercase tracking-widest ${
+                              funEnabled ? 'text-emerald-400' : 'text-rose-500'
+                            }">
+                                ${
+                                  funEnabled
+                                    ? '● System Active'
+                                    : '○ System Offline'
+                                }
                             </span>
                         </a>
                     </div>
                 </div>
 
-                ${triggers.length === 0 ? `
+                ${
+                  triggers.length === 0
+                    ? `
                 <div class="text-center py-20">
                     <p class="text-slate-600 text-sm font-bold uppercase tracking-widest mb-2">No Active Triggers</p>
                     <p class="text-slate-700 text-xs">Use <code class="bg-slate-800 px-2 py-0.5 rounded text-[#FFAA00]">/reactmessage</code> in Discord to create one.</p>
-                </div>` : `
+                </div>`
+                    : `
                 <div class="grid gap-4">
-                    ${triggers.map(t => `
+                    ${triggers
+                      .map(
+                        t => `
                         <div class="bg-slate-900/40 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
                             <div class="flex items-center gap-4">
                                 <div class="w-12 h-12 bg-[#FFAA00]/10 rounded-xl flex items-center justify-center text-2xl border border-[#FFAA00]/20">
                                     ${t.reaction_id}
                                 </div>
                                 <div>
-                                    <p class="text-white font-bold text-sm">Target: <span class="text-[#FFAA00] mono"><@${t.target_user_id}></span></p>
-                                    <p class="text-[10px] text-slate-400 uppercase font-bold mt-0.5">Threshold: ${t.trigger_count} reactions</p>
-                                    <p class="text-xs text-slate-500 mt-1">Reply: <span class="text-slate-300 italic">"${t.response_text}"</span></p>
+                                    <p class="text-white font-bold text-sm">Target: <span class="text-[#FFAA00] mono"><@${
+                                      t.target_user_id
+                                    }></span></p>
+                                    <p class="text-[10px] text-slate-400 uppercase font-bold mt-0.5">Threshold: ${
+                                      t.trigger_count
+                                    } reactions</p>
+                                    <p class="text-xs text-slate-500 mt-1">Reply: <span class="text-slate-300 italic">"${
+                                      t.response_text
+                                    }"</span></p>
                                 </div>
                             </div>
                             <div class="flex items-center gap-4">
-                                <span class="text-[9px] px-2 py-1 rounded border font-black uppercase ${t.enabled ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-rose-400 border-rose-500/20 bg-rose-500/10'}">${t.enabled ? 'Enabled' : 'Disabled'}</span>
-                                <a href="/fun/delete/${t.id}?guild=${selectedGuildId}" 
+                                <span class="text-[9px] px-2 py-1 rounded border font-black uppercase ${
+                                  t.enabled
+                                    ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10'
+                                    : 'text-rose-400 border-rose-500/20 bg-rose-500/10'
+                                }">${t.enabled ? 'Enabled' : 'Disabled'}</span>
+                                <a href="/fun/delete/${
+                                  t.id
+                                }?guild=${selectedGuildId}" 
                                    onclick="return confirm('Delete this trigger?')"
                                    class="text-rose-500 hover:text-rose-400 text-[10px] font-black uppercase tracking-widest transition">Delete</a>
                             </div>
                         </div>
-                    `).join('')}
-                </div>`}
+                    `
+                      )
+                      .join('')}
+                </div>`
+                }
             </div>
         </body>
         </html>
-    `);
-});
+    `)
+})
 
-app.get("/fun/toggle", (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
-    const guildId = req.query.guild;
-    if (!guildId) return res.redirect("/fun");
-    const managedGuilds = getManagedGuilds(req.user.id);
-    if (!managedGuilds.includes(guildId)) return res.status(403).send(getErrorPage("Access Denied", "Unauthorized."));
-    db.prepare("UPDATE guild_settings SET fun_features_enabled = CASE WHEN fun_features_enabled = 1 THEN 0 ELSE 1 END WHERE guild_id = ?").run(guildId);
-    res.redirect(`/fun?guild=${guildId}`);
-});
+app.get('/fun/toggle', (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
+  const guildId = req.query.guild
+  if (!guildId) return res.redirect('/fun')
+  const managedGuilds = getManagedGuilds(req.user.id)
+  if (!managedGuilds.includes(guildId))
+    return res.status(403).send(getErrorPage('Access Denied', 'Unauthorized.'))
+  db.prepare(
+    'UPDATE guild_settings SET fun_features_enabled = CASE WHEN fun_features_enabled = 1 THEN 0 ELSE 1 END WHERE guild_id = ?'
+  ).run(guildId)
+  res.redirect(`/fun?guild=${guildId}`)
+})
 
 // ============================================================
 // ADMIN PANEL ROUTES
 // ============================================================
 
 app.get('/admin/login', (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    if (req.user.id !== process.env.ADMIN_DISCORD_ID) {
-        return res.status(403).send(getErrorPage("Access Denied", "Restricted area.", "403"));
-    }
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
+  if (req.user.id !== process.env.ADMIN_DISCORD_ID) {
+    return res
+      .status(403)
+      .send(getErrorPage('Access Denied', 'Restricted area.', '403'))
+  }
 
-    const error = req.query.error;
-    res.send(`
+  const error = req.query.error
+  res.send(`
         <html>
-        ${getHead("Impulse | Admin Access")}
+        ${getHead('Impulse | Admin Access')}
         <body class="bg-[#0b0f1a] text-white flex items-center justify-center min-h-screen p-6">
             <div class="max-w-sm w-full">
                 <div class="text-center mb-8">
@@ -2863,7 +3121,11 @@ app.get('/admin/login', (req, res) => {
                 </div>
 
                 <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-                    ${error ? `<div class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold px-4 py-3 rounded-xl mb-4 uppercase tracking-widest">❌ ${error}</div>` : ''}
+                    ${
+                      error
+                        ? `<div class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold px-4 py-3 rounded-xl mb-4 uppercase tracking-widest">❌ ${error}</div>`
+                        : ''
+                    }
                     <form method="POST" action="/admin/login" class="space-y-4">
                         <div>
                             <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Passphrase</label>
@@ -2880,61 +3142,71 @@ app.get('/admin/login', (req, res) => {
             </div>
         </body>
         </html>
-    `);
-});
+    `)
+})
 
 app.post('/admin/login', (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect('/auth/discord');
-    if (req.user.id !== process.env.ADMIN_DISCORD_ID) return res.status(403).send('Forbidden');
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
+  if (req.user.id !== process.env.ADMIN_DISCORD_ID)
+    return res.status(403).send('Forbidden')
 
-    if (req.body.secret !== process.env.ADMIN_SECRET) {
-        return res.redirect('/admin/login?error=Invalid+passphrase');
-    }
+  if (req.body.secret !== process.env.ADMIN_SECRET) {
+    return res.redirect('/admin/login?error=Invalid+passphrase')
+  }
 
-    const token = require('crypto').randomBytes(32).toString('hex');
-    adminSessions.set(token, {
-        userId: req.user.id,
-        expires: Date.now() + 2 * 60 * 60 * 1000
-    });
+  const token = require('crypto').randomBytes(32).toString('hex')
+  adminSessions.set(token, {
+    userId: req.user.id,
+    expires: Date.now() + 2 * 60 * 60 * 1000
+  })
 
-    res.cookie('admin_token', token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'strict',
-        maxAge: 2 * 60 * 60 * 1000
-    });
+  res.cookie('admin_token', token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: 2 * 60 * 60 * 1000
+  })
 
-    res.redirect('/admin');
-});
+  res.redirect('/admin')
+})
 
 app.get('/admin/logout', (req, res) => {
-    const token = req.cookies?.admin_token;
-    if (token) adminSessions.delete(token);
-    res.clearCookie('admin_token');
-    res.redirect('/');
-});
+  const token = req.cookies?.admin_token
+  if (token) adminSessions.delete(token)
+  res.clearCookie('admin_token')
+  res.redirect('/')
+})
 
 // ADMIN OVERVIEW
 app.get('/admin', requireAdmin, (req, res) => {
-    const stats = {
-        guilds: client.guilds.cache.size,
-        users: client.users.cache.size,
-        totalLogs: db.prepare("SELECT COUNT(*) as c FROM audit_logs").get().c,
-        totalSnippets: db.prepare("SELECT COUNT(*) as c FROM snippets").get().c,
-        totalThreads: db.prepare("SELECT COUNT(*) as c FROM thread_tracking").get().c,
-        pendingLocks: db.prepare("SELECT COUNT(*) as c FROM pending_locks").get().c,
-        blockedUsers: db.prepare("SELECT COUNT(*) as c FROM blocked_users").get().c,
-        bannedUsers: db.prepare("SELECT COUNT(*) as c FROM banned_users").get().c,
-        suspendedUsers: db.prepare("SELECT COUNT(*) as c FROM suspended_users WHERE expires_at > ?").get(Date.now()).c,
-        recentErrors: db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE action = 'ERROR' AND timestamp > datetime('now', '-24 hours')").get().c,
-    };
+  const stats = {
+    guilds: client.guilds.cache.size,
+    users: client.users.cache.size,
+    totalLogs: db.prepare('SELECT COUNT(*) as c FROM audit_logs').get().c,
+    totalSnippets: db.prepare('SELECT COUNT(*) as c FROM snippets').get().c,
+    totalThreads: db.prepare('SELECT COUNT(*) as c FROM thread_tracking').get()
+      .c,
+    pendingLocks: db.prepare('SELECT COUNT(*) as c FROM pending_locks').get().c,
+    blockedUsers: db.prepare('SELECT COUNT(*) as c FROM blocked_users').get().c,
+    bannedUsers: db.prepare('SELECT COUNT(*) as c FROM banned_users').get().c,
+    suspendedUsers: db
+      .prepare('SELECT COUNT(*) as c FROM suspended_users WHERE expires_at > ?')
+      .get(Date.now()).c,
+    recentErrors: db
+      .prepare(
+        "SELECT COUNT(*) as c FROM audit_logs WHERE action = 'ERROR' AND timestamp > datetime('now', '-24 hours')"
+      )
+      .get().c
+  }
 
-    const recentLogs = db.prepare("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 20").all();
-    const allGuilds = db.prepare("SELECT * FROM guild_settings").all();
+  const recentLogs = db
+    .prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 20')
+    .all()
+  const allGuilds = db.prepare('SELECT * FROM guild_settings').all()
 
-    res.send(`
+  res.send(`
         <html>
-        ${getHead("Impulse | Admin Control Panel")}
+        ${getHead('Impulse | Admin Control Panel')}
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-7xl mx-auto">
             ${getAdminNav('overview')}
@@ -2947,22 +3219,58 @@ app.get('/admin', requireAdmin, (req, res) => {
             <!-- Stats Grid -->
             <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
                 ${[
-                    { label: 'Servers', value: stats.guilds, color: 'amber' },
-                    { label: 'Cached Users', value: stats.users, color: 'blue' },
-                    { label: 'Total Logs', value: stats.totalLogs, color: 'slate' },
-                    { label: 'Active Threads', value: stats.totalThreads, color: 'emerald' },
-                    { label: 'Pending Locks', value: stats.pendingLocks, color: 'orange' },
-                    { label: 'Blocked Users', value: stats.blockedUsers, color: 'red' },
-                    { label: 'Banned Users', value: stats.bannedUsers, color: 'red' },
-                    { label: 'Suspended', value: stats.suspendedUsers, color: 'yellow' },
-                    { label: 'Snippets', value: stats.totalSnippets, color: 'purple' },
-                    { label: 'Errors (24h)', value: stats.recentErrors, color: stats.recentErrors > 0 ? 'red' : 'slate' },
-                ].map(s => `
+                  { label: 'Servers', value: stats.guilds, color: 'amber' },
+                  { label: 'Cached Users', value: stats.users, color: 'blue' },
+                  {
+                    label: 'Total Logs',
+                    value: stats.totalLogs,
+                    color: 'slate'
+                  },
+                  {
+                    label: 'Active Threads',
+                    value: stats.totalThreads,
+                    color: 'emerald'
+                  },
+                  {
+                    label: 'Pending Locks',
+                    value: stats.pendingLocks,
+                    color: 'orange'
+                  },
+                  {
+                    label: 'Blocked Users',
+                    value: stats.blockedUsers,
+                    color: 'red'
+                  },
+                  {
+                    label: 'Banned Users',
+                    value: stats.bannedUsers,
+                    color: 'red'
+                  },
+                  {
+                    label: 'Suspended',
+                    value: stats.suspendedUsers,
+                    color: 'yellow'
+                  },
+                  {
+                    label: 'Snippets',
+                    value: stats.totalSnippets,
+                    color: 'purple'
+                  },
+                  {
+                    label: 'Errors (24h)',
+                    value: stats.recentErrors,
+                    color: stats.recentErrors > 0 ? 'red' : 'slate'
+                  }
+                ]
+                  .map(
+                    s => `
                     <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
                         <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">${s.label}</p>
                         <p class="text-2xl font-black text-white">${s.value}</p>
                     </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
             </div>
 
             <!-- Per-server breakdown -->
@@ -2974,29 +3282,74 @@ app.get('/admin', requireAdmin, (req, res) => {
                     <table class="w-full text-left">
                         <thead class="bg-slate-900/60 border-b border-slate-800">
                             <tr>
-                                ${['Server', 'Guild ID', 'Forum', 'Snippets', 'Threads Tracked', 'Pending Locks', 'Blocked Users'].map(h =>
-                                    `<th class="p-4 text-[9px] font-black uppercase text-slate-500 tracking-widest">${h}</th>`
-                                ).join('')}
+                                ${[
+                                  'Server',
+                                  'Guild ID',
+                                  'Forum',
+                                  'Snippets',
+                                  'Threads Tracked',
+                                  'Pending Locks',
+                                  'Blocked Users'
+                                ]
+                                  .map(
+                                    h =>
+                                      `<th class="p-4 text-[9px] font-black uppercase text-slate-500 tracking-widest">${h}</th>`
+                                  )
+                                  .join('')}
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/40">
-                            ${allGuilds.map(g => {
-                                const guild = client.guilds.cache.get(g.guild_id);
-                                const snippets = db.prepare("SELECT COUNT(*) as c FROM snippets WHERE guild_id = ?").get(g.guild_id).c;
-                                const threads = db.prepare("SELECT COUNT(*) as c FROM thread_tracking WHERE guild_id = ?").get(g.guild_id).c;
-                                const locks = db.prepare("SELECT COUNT(*) as c FROM pending_locks WHERE guild_id = ?").get(g.guild_id).c;
-                                const blocked = db.prepare("SELECT COUNT(*) as c FROM blocked_users WHERE guild_id = ?").get(g.guild_id).c;
+                            ${allGuilds
+                              .map(g => {
+                                const guild = client.guilds.cache.get(
+                                  g.guild_id
+                                )
+                                const snippets = db
+                                  .prepare(
+                                    'SELECT COUNT(*) as c FROM snippets WHERE guild_id = ?'
+                                  )
+                                  .get(g.guild_id).c
+                                const threads = db
+                                  .prepare(
+                                    'SELECT COUNT(*) as c FROM thread_tracking WHERE guild_id = ?'
+                                  )
+                                  .get(g.guild_id).c
+                                const locks = db
+                                  .prepare(
+                                    'SELECT COUNT(*) as c FROM pending_locks WHERE guild_id = ?'
+                                  )
+                                  .get(g.guild_id).c
+                                const blocked = db
+                                  .prepare(
+                                    'SELECT COUNT(*) as c FROM blocked_users WHERE guild_id = ?'
+                                  )
+                                  .get(g.guild_id).c
                                 return `
                                 <tr class="hover:bg-white/5 transition">
-                                    <td class="p-4 text-sm font-bold text-white">${g.guild_name}</td>
-                                    <td class="p-4 text-[10px] mono text-slate-500">${g.guild_id}</td>
-                                    <td class="p-4 text-[10px] mono text-slate-500">${g.forum_id}</td>
+                                    <td class="p-4 text-sm font-bold text-white">${
+                                      g.guild_name
+                                    }</td>
+                                    <td class="p-4 text-[10px] mono text-slate-500">${
+                                      g.guild_id
+                                    }</td>
+                                    <td class="p-4 text-[10px] mono text-slate-500">${
+                                      g.forum_id
+                                    }</td>
                                     <td class="p-4 text-sm text-slate-300">${snippets}</td>
                                     <td class="p-4 text-sm text-slate-300">${threads}</td>
-                                    <td class="p-4 text-sm ${locks > 0 ? 'text-emerald-400' : 'text-slate-500'}">${locks}</td>
-                                    <td class="p-4 text-sm ${blocked > 0 ? 'text-red-400' : 'text-slate-500'}">${blocked}</td>
-                                </tr>`;
-                            }).join('')}
+                                    <td class="p-4 text-sm ${
+                                      locks > 0
+                                        ? 'text-emerald-400'
+                                        : 'text-slate-500'
+                                    }">${locks}</td>
+                                    <td class="p-4 text-sm ${
+                                      blocked > 0
+                                        ? 'text-red-400'
+                                        : 'text-slate-500'
+                                    }">${blocked}</td>
+                                </tr>`
+                              })
+                              .join('')}
                         </tbody>
                     </table>
                 </div>
@@ -3009,29 +3362,49 @@ app.get('/admin', requireAdmin, (req, res) => {
                     <a href="/admin/errors" class="text-red-400 text-[9px] font-black uppercase tracking-widest hover:underline">Errors Only →</a>
                 </div>
                 <div class="divide-y divide-slate-800/40">
-                    ${recentLogs.map(l => `
+                    ${recentLogs
+                      .map(
+                        l => `
                         <div class="p-4 hover:bg-white/5 transition flex items-center gap-4">
-                            <span class="px-2 py-0.5 rounded text-[8px] font-black ${getActionColor(l.action)} border shrink-0">${l.action}</span>
-                            <p class="text-xs text-slate-400 flex-1 truncate">${l.details}</p>
-                            <span class="text-[9px] text-slate-600 mono shrink-0">${new Date(l.timestamp).toLocaleString()}</span>
+                            <span class="px-2 py-0.5 rounded text-[8px] font-black ${getActionColor(
+                              l.action
+                            )} border shrink-0">${l.action}</span>
+                            <p class="text-xs text-slate-400 flex-1 truncate">${
+                              l.details
+                            }</p>
+                            <span class="text-[9px] text-slate-600 mono shrink-0">${new Date(
+                              l.timestamp
+                            ).toLocaleString()}</span>
                         </div>
-                    `).join('')}
+                    `
+                      )
+                      .join('')}
                 </div>
             </div>
         </div>
         </body></html>
-    `);
-});
+    `)
+})
 
 // ADMIN USERS PAGE
 app.get('/admin/users', requireAdmin, (req, res) => {
-    const blockedUsers = db.prepare("SELECT bu.*, gs.guild_name FROM blocked_users bu LEFT JOIN guild_settings gs ON bu.guild_id = gs.guild_id ORDER BY bu.blocked_at DESC").all();
-    const bannedUsers = db.prepare("SELECT * FROM banned_users ORDER BY banned_at DESC").all();
-    const suspendedUsers = db.prepare("SELECT su.*, gs.guild_name FROM suspended_users su LEFT JOIN guild_settings gs ON su.guild_id = gs.guild_id WHERE su.expires_at > ? ORDER BY su.suspended_at DESC").all(Date.now());
+  const blockedUsers = db
+    .prepare(
+      'SELECT bu.*, gs.guild_name FROM blocked_users bu LEFT JOIN guild_settings gs ON bu.guild_id = gs.guild_id ORDER BY bu.blocked_at DESC'
+    )
+    .all()
+  const bannedUsers = db
+    .prepare('SELECT * FROM banned_users ORDER BY banned_at DESC')
+    .all()
+  const suspendedUsers = db
+    .prepare(
+      'SELECT su.*, gs.guild_name FROM suspended_users su LEFT JOIN guild_settings gs ON su.guild_id = gs.guild_id WHERE su.expires_at > ? ORDER BY su.suspended_at DESC'
+    )
+    .all(Date.now())
 
-    res.send(`
+  res.send(`
         <html>
-        ${getHead("Impulse Admin | Users")}
+        ${getHead('Impulse Admin | Users')}
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-7xl mx-auto">
             ${getAdminNav('users')}
@@ -3044,84 +3417,154 @@ app.get('/admin/users', requireAdmin, (req, res) => {
             <!-- Banned Users -->
             <div class="bg-slate-900/40 border border-red-900/30 rounded-2xl overflow-hidden mb-6">
                 <div class="p-5 border-b border-red-900/30 bg-red-900/10">
-                    <h2 class="text-sm font-black text-red-400 uppercase tracking-tight">🔨 Globally Banned (${bannedUsers.length})</h2>
+                    <h2 class="text-sm font-black text-red-400 uppercase tracking-tight">🔨 Globally Banned (${
+                      bannedUsers.length
+                    })</h2>
                 </div>
-                ${bannedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No globally banned users</p>' : `
+                ${
+                  bannedUsers.length === 0
+                    ? '<p class="text-center text-slate-600 py-8 text-xs italic">No globally banned users</p>'
+                    : `
                 <div class="divide-y divide-slate-800/40">
-                    ${bannedUsers.map(u => {
-                        const name = resolveUserName(u.user_id);
-                        const avatar = resolveUserAvatar(u.user_id);
-                        const bannedByName = resolveUserName(u.banned_by);
+                    ${bannedUsers
+                      .map(u => {
+                        const name = resolveUserName(u.user_id)
+                        const avatar = resolveUserAvatar(u.user_id)
+                        const bannedByName = resolveUserName(u.banned_by)
                         return `
                         <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
                             <div class="flex items-center gap-3">
                                 <img src="${avatar}" class="w-8 h-8 rounded-full border border-red-900/40">
                                 <div>
-                                    <p class="text-sm font-bold text-white">${sanitize(name)} <span class="text-slate-600 text-[9px] mono">…${u.user_id.slice(-5)}</span></p>
-                                    <p class="text-[10px] text-slate-500">${sanitize(u.reason || 'No reason given')} • Banned by ${sanitize(bannedByName)}</p>
+                                    <p class="text-sm font-bold text-white">${sanitize(
+                                      name
+                                    )} <span class="text-slate-600 text-[9px] mono">…${u.user_id.slice(
+                          -5
+                        )}</span></p>
+                                    <p class="text-[10px] text-slate-500">${sanitize(
+                                      u.reason || 'No reason given'
+                                    )} • Banned by ${sanitize(bannedByName)}</p>
                                 </div>
                             </div>
                             <div class="flex items-center gap-3">
-                                <span class="text-[9px] text-slate-600 mono">${new Date(u.banned_at).toLocaleDateString()}</span>
-                                <a href="/admin/globalunban/${u.user_id}" onclick="return confirm('Remove ${sanitize(name)} from global blacklist?')"
+                                <span class="text-[9px] text-slate-600 mono">${new Date(
+                                  u.banned_at
+                                ).toLocaleDateString()}</span>
+                                <a href="/admin/globalunban/${
+                                  u.user_id
+                                }" onclick="return confirm('Remove ${sanitize(
+                          name
+                        )} from global blacklist?')"
                                    class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Unban</a>
                             </div>
-                        </div>`;
-                    }).join('')}
-                </div>`}
+                        </div>`
+                      })
+                      .join('')}
+                </div>`
+                }
             </div>
 
             <!-- Blocked Users -->
             <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden mb-6">
                 <div class="p-5 border-b border-slate-800">
-                    <h2 class="text-sm font-black text-orange-400 uppercase tracking-tight">🚫 Server Blocked (${blockedUsers.length})</h2>
+                    <h2 class="text-sm font-black text-orange-400 uppercase tracking-tight">🚫 Server Blocked (${
+                      blockedUsers.length
+                    })</h2>
                 </div>
-                ${blockedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No blocked users</p>' : `
+                ${
+                  blockedUsers.length === 0
+                    ? '<p class="text-center text-slate-600 py-8 text-xs italic">No blocked users</p>'
+                    : `
                 <div class="divide-y divide-slate-800/40">
-                    ${blockedUsers.map(u => {
-                        const name = sanitize(u.user_name || "Unknown User");
-                        const avatar = u.user_avatar || "https://cdn.discordapp.com/embed/avatars/0.png";
-                        const maskedId = u.user_id ? '...' + u.user_id.slice(-5) : "Unknown";
-                        const date = new Date(u.blocked_at).toLocaleDateString();
+                    ${blockedUsers
+                      .map(u => {
+                        const name = sanitize(u.user_name || 'Unknown User')
+                        const avatar =
+                          u.user_avatar ||
+                          'https://cdn.discordapp.com/embed/avatars/0.png'
+                        const maskedId = u.user_id
+                          ? '...' + u.user_id.slice(-5)
+                          : 'Unknown'
+                        const date = new Date(u.blocked_at).toLocaleDateString()
 
-                        return '<div class="p-4 flex items-center justify-between hover:bg-white/5 transition">' +
-                            '<div class="flex items-center gap-3">' +
-                                '<img src="' + avatar + '" class="w-8 h-8 rounded-full border border-slate-700 shadow-sm" onerror="this.src=\'https://cdn.discordapp.com/embed/avatars/0.png\'">' +
-                                '<div>' +
-                                    '<p class="text-sm font-bold text-white">' + name + ' <span class="text-slate-600 text-[9px] font-mono bg-black/20 px-1 rounded">' + maskedId + '</span></p>' +
-                                    '<p class="text-[10px] text-slate-500">' + sanitize(u.guild_name || "Unknown server") + ' • ' + sanitize(u.reason || "No reason") + '</p>' +
-                                '</div>' +
-                            '</div>' +
-                            '<div class="flex items-center gap-3">' +
-                                '<span class="text-[9px] text-slate-600 font-mono">' + date + '</span>' +
-                                '<a href="/admin/unblock/' + u.guild_id + '/' + u.user_id + '" onclick="return confirm(\'Unblock this user?\')" class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition px-2 py-1 bg-emerald-400/10 rounded">Unblock</a>' +
-                            '</div>' +
-                        '</div>';
-                    }).join('')}
-                </div>`}
+                        return (
+                          '<div class="p-4 flex items-center justify-between hover:bg-white/5 transition">' +
+                          '<div class="flex items-center gap-3">' +
+                          '<img src="' +
+                          avatar +
+                          '" class="w-8 h-8 rounded-full border border-slate-700 shadow-sm" onerror="this.src=\'https://cdn.discordapp.com/embed/avatars/0.png\'">' +
+                          '<div>' +
+                          '<p class="text-sm font-bold text-white">' +
+                          name +
+                          ' <span class="text-slate-600 text-[9px] font-mono bg-black/20 px-1 rounded">' +
+                          maskedId +
+                          '</span></p>' +
+                          '<p class="text-[10px] text-slate-500">' +
+                          sanitize(u.guild_name || 'Unknown server') +
+                          ' • ' +
+                          sanitize(u.reason || 'No reason') +
+                          '</p>' +
+                          '</div>' +
+                          '</div>' +
+                          '<div class="flex items-center gap-3">' +
+                          '<span class="text-[9px] text-slate-600 font-mono">' +
+                          date +
+                          '</span>' +
+                          '<a href="/admin/unblock/' +
+                          u.guild_id +
+                          '/' +
+                          u.user_id +
+                          '" onclick="return confirm(\'Unblock this user?\')" class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition px-2 py-1 bg-emerald-400/10 rounded">Unblock</a>' +
+                          '</div>' +
+                          '</div>'
+                        )
+                      })
+                      .join('')}
+                </div>`
+                }
             </div>
 
             <!-- Suspended Users -->
             <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
                 <div class="p-5 border-b border-slate-800">
-                    <h2 class="text-sm font-black text-yellow-400 uppercase tracking-tight">⏸ Auto-Suspended (${suspendedUsers.length})</h2>
+                    <h2 class="text-sm font-black text-yellow-400 uppercase tracking-tight">⏸ Auto-Suspended (${
+                      suspendedUsers.length
+                    })</h2>
                 </div>
-                ${suspendedUsers.length === 0 ? '<p class="text-center text-slate-600 py-8 text-xs italic">No active suspensions</p>' : `
+                ${
+                  suspendedUsers.length === 0
+                    ? '<p class="text-center text-slate-600 py-8 text-xs italic">No active suspensions</p>'
+                    : `
                 <div class="divide-y divide-slate-800/40">
-                    ${suspendedUsers.map(u => `
+                    ${suspendedUsers
+                      .map(
+                        u => `
                         <div class="p-4 flex items-center justify-between hover:bg-white/5 transition">
                             <div>
-                                <p class="text-sm font-bold text-white">${sanitize(resolveUserName(u.user_id))} <span class="text-slate-600 text-[9px] mono">…${u.user_id.slice(-5)}</span></p>
-                                <p class="text-[10px] text-slate-500">${sanitize(u.guild_name || 'Unknown server')} • ${sanitize(u.reason)}</p>
+                                <p class="text-sm font-bold text-white">${sanitize(
+                                  resolveUserName(u.user_id)
+                                )} <span class="text-slate-600 text-[9px] mono">…${u.user_id.slice(
+                          -5
+                        )}</span></p>
+                                <p class="text-[10px] text-slate-500">${sanitize(
+                                  u.guild_name || 'Unknown server'
+                                )} • ${sanitize(u.reason)}</p>
                             </div>
                             <div class="flex items-center gap-3">
-                                <span class="text-[9px] text-yellow-500 font-bold">Expires <span data-expire="${u.expires_at}">...</span></span>
-                                <a href="/admin/unsuspend/${u.guild_id}/${u.user_id}" onclick="return confirm('Lift this suspension?')"
+                                <span class="text-[9px] text-yellow-500 font-bold">Expires <span data-expire="${
+                                  u.expires_at
+                                }">...</span></span>
+                                <a href="/admin/unsuspend/${u.guild_id}/${
+                          u.user_id
+                        }" onclick="return confirm('Lift this suspension?')"
                                    class="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 transition">Lift</a>
                             </div>
                         </div>
-                    `).join('')}
-                </div>`}
+                    `
+                      )
+                      .join('')}
+                </div>`
+                }
             </div>
         </div>
         <script>
@@ -3132,16 +3575,20 @@ app.get('/admin/users', requireAdmin, (req, res) => {
             });
         </script>
         </body></html>
-    `);
-});
+    `)
+})
 
 // ADMIN ERRORS PAGE
 app.get('/admin/errors', requireAdmin, (req, res) => {
-    const errors = db.prepare("SELECT * FROM audit_logs WHERE action IN ('ERROR', 'AUTO_SUSPEND', 'AUTO_CLOSE') ORDER BY timestamp DESC LIMIT 100").all();
+  const errors = db
+    .prepare(
+      "SELECT * FROM audit_logs WHERE action IN ('ERROR', 'AUTO_SUSPEND', 'AUTO_CLOSE') ORDER BY timestamp DESC LIMIT 100"
+    )
+    .all()
 
-    res.send(`
+  res.send(`
         <html>
-        ${getHead("Impulse Admin | Errors")}
+        ${getHead('Impulse Admin | Errors')}
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-7xl mx-auto">
             ${getAdminNav('errors')}
@@ -3151,37 +3598,73 @@ app.get('/admin/errors', requireAdmin, (req, res) => {
             </div>
 
             <div class="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
-                ${errors.length === 0 ? '<p class="text-center text-slate-600 py-16 text-sm italic">No errors or automated events logged. All clear!</p>' : `
+                ${
+                  errors.length === 0
+                    ? '<p class="text-center text-slate-600 py-16 text-sm italic">No errors or automated events logged. All clear!</p>'
+                    : `
                 <div class="divide-y divide-slate-800/40">
-                    ${errors.map(e => `
+                    ${errors
+                      .map(
+                        e => `
                         <div class="p-4 hover:bg-white/5 transition flex items-start gap-4">
-                            <span class="px-2 py-0.5 rounded text-[8px] font-black ${getActionColor(e.action)} border shrink-0 mt-0.5">${e.action}</span>
+                            <span class="px-2 py-0.5 rounded text-[8px] font-black ${getActionColor(
+                              e.action
+                            )} border shrink-0 mt-0.5">${e.action}</span>
                             <div class="flex-1 min-w-0">
-                                <p class="text-xs text-slate-300 font-medium">${e.details}</p>
-                                ${e.user_name ? `<p class="text-[10px] text-slate-600 mt-0.5">User: ${e.user_name} (${e.user_id})</p>` : ''}
+                                <p class="text-xs text-slate-300 font-medium">${
+                                  e.details
+                                }</p>
+                                ${
+                                  e.user_name
+                                    ? `<p class="text-[10px] text-slate-600 mt-0.5">User: ${e.user_name} (${e.user_id})</p>`
+                                    : ''
+                                }
                             </div>
-                            <span class="text-[9px] text-slate-600 mono shrink-0">${new Date(e.timestamp).toLocaleString()}</span>
+                            <span class="text-[9px] text-slate-600 mono shrink-0">${new Date(
+                              e.timestamp
+                            ).toLocaleString()}</span>
                         </div>
-                    `).join('')}
-                </div>`}
+                    `
+                      )
+                      .join('')}
+                </div>`
+                }
             </div>
         </div>
         </body></html>
-    `);
-});
+    `)
+})
 
 // ADMIN DATABASE PAGE
 app.get('/admin/database', requireAdmin, (req, res) => {
-    const tables = ['guild_settings', 'thread_tracking', 'pending_locks', 'audit_logs', 'snippets', 'thread_links', 'reaction_triggers', 'blocked_users', 'banned_users', 'suspended_users', 'command_cooldowns'];
-    const tableCounts = tables.map(t => ({
-        name: t,
-        count: db.prepare(`SELECT COUNT(*) as c FROM ${t}`).get().c
-    }));
-    const dbSize = (() => { try { return require('fs').statSync('database.db').size; } catch(e) { return 0; } })();
+  const tables = [
+    'guild_settings',
+    'thread_tracking',
+    'pending_locks',
+    'audit_logs',
+    'snippets',
+    'thread_links',
+    'reaction_triggers',
+    'blocked_users',
+    'banned_users',
+    'suspended_users',
+    'command_cooldowns'
+  ]
+  const tableCounts = tables.map(t => ({
+    name: t,
+    count: db.prepare(`SELECT COUNT(*) as c FROM ${t}`).get().c
+  }))
+  const dbSize = (() => {
+    try {
+      return require('fs').statSync('database.db').size
+    } catch (e) {
+      return 0
+    }
+  })()
 
-    res.send(`
+  res.send(`
         <html>
-        ${getHead("Impulse Admin | Database")}
+        ${getHead('Impulse Admin | Database')}
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-7xl mx-auto">
             ${getAdminNav('database')}
@@ -3193,15 +3676,23 @@ app.get('/admin/database', requireAdmin, (req, res) => {
             <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-5 mb-6 flex items-center justify-between">
                 <div>
                     <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Database File Size</p>
-                    <p class="text-2xl font-black text-white">${(dbSize / 1024).toFixed(1)} <span class="text-sm text-slate-500">KB</span></p>
+                    <p class="text-2xl font-black text-white">${(
+                      dbSize / 1024
+                    ).toFixed(
+                      1
+                    )} <span class="text-sm text-slate-500">KB</span></p>
                 </div>
                 <div>
                     <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Tables</p>
-                    <p class="text-2xl font-black text-white">${tables.length}</p>
+                    <p class="text-2xl font-black text-white">${
+                      tables.length
+                    }</p>
                 </div>
                 <div>
                     <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Rows</p>
-                    <p class="text-2xl font-black text-white">${tableCounts.reduce((a, t) => a + t.count, 0).toLocaleString()}</p>
+                    <p class="text-2xl font-black text-white">${tableCounts
+                      .reduce((a, t) => a + t.count, 0)
+                      .toLocaleString()}</p>
                 </div>
                 <a href="/admin/database/vacuum" onclick="return confirm('Run VACUUM? This will optimize the database.')"
                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition">
@@ -3210,37 +3701,43 @@ app.get('/admin/database', requireAdmin, (req, res) => {
             </div>
 
             <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-                ${tableCounts.map(t => `
+                ${tableCounts
+                  .map(
+                    t => `
                     <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
-                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 mono">${t.name}</p>
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 mono">${
+                          t.name
+                        }</p>
                         <p class="text-3xl font-black text-white">${t.count.toLocaleString()}</p>
                         <p class="text-[9px] text-slate-600 uppercase font-bold mt-1">rows</p>
                     </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
             </div>
         </div>
         </body></html>
-    `);
-});
+    `)
+})
 
 app.get('/admin/database/vacuum', requireAdmin, (req, res) => {
-    db.prepare("VACUUM").run();
-    res.redirect('/admin/database');
-});
+  db.prepare('VACUUM').run()
+  res.redirect('/admin/database')
+})
 
 // ADMIN SYSTEM PAGE
 app.get('/admin/system', requireAdmin, (req, res) => {
-    const memUsage = process.memoryUsage();
-    const uptimeSeconds = process.uptime();
-    const d = Math.floor(uptimeSeconds / 86400);
-    const h = Math.floor((uptimeSeconds % 86400) / 3600);
-    const m = Math.floor((uptimeSeconds % 3600) / 60);
-    const s = Math.floor(uptimeSeconds % 60);
-    const uptimeStr = `${d}d ${h}h ${m}m ${s}s`;
+  const memUsage = process.memoryUsage()
+  const uptimeSeconds = process.uptime()
+  const d = Math.floor(uptimeSeconds / 86400)
+  const h = Math.floor((uptimeSeconds % 86400) / 3600)
+  const m = Math.floor((uptimeSeconds % 3600) / 60)
+  const s = Math.floor(uptimeSeconds % 60)
+  const uptimeStr = `${d}d ${h}h ${m}m ${s}s`
 
-    res.send(`
+  res.send(`
         <html>
-        ${getHead("Impulse Admin | System")}
+        ${getHead('Impulse Admin | System')}
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-7xl mx-auto">
             ${getAdminNav('system')}
@@ -3253,39 +3750,66 @@ app.get('/admin/system', requireAdmin, (req, res) => {
                 <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
                     <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Process Info</h3>
                     ${[
-                        ['Uptime', uptimeStr],
-                        ['Node.js Version', process.version],
-                        ['Platform', process.platform],
-                        ['PID', process.pid],
-                        ['Discord.js', require('./node_modules/discord.js/package.json').version],
-                    ].map(([k, v]) => `
+                      ['Uptime', uptimeStr],
+                      ['Node.js Version', process.version],
+                      ['Platform', process.platform],
+                      ['PID', process.pid],
+                      [
+                        'Discord.js',
+                        require('./node_modules/discord.js/package.json')
+                          .version
+                      ]
+                    ]
+                      .map(
+                        ([k, v]) => `
                         <div class="flex justify-between items-center py-2 border-b border-slate-800/50">
                             <span class="text-[10px] font-black text-slate-500 uppercase tracking-widest">${k}</span>
                             <span class="text-xs font-bold text-white mono">${v}</span>
                         </div>
-                    `).join('')}
+                    `
+                      )
+                      .join('')}
                 </div>
 
                 <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
                     <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Memory Usage</h3>
                     ${[
-                        ['Heap Used', (memUsage.heapUsed / 1024 / 1024).toFixed(2) + ' MB'],
-                        ['Heap Total', (memUsage.heapTotal / 1024 / 1024).toFixed(2) + ' MB'],
-                        ['RSS', (memUsage.rss / 1024 / 1024).toFixed(2) + ' MB'],
-                        ['External', (memUsage.external / 1024 / 1024).toFixed(2) + ' MB'],
-                    ].map(([k, v]) => `
+                      [
+                        'Heap Used',
+                        (memUsage.heapUsed / 1024 / 1024).toFixed(2) + ' MB'
+                      ],
+                      [
+                        'Heap Total',
+                        (memUsage.heapTotal / 1024 / 1024).toFixed(2) + ' MB'
+                      ],
+                      ['RSS', (memUsage.rss / 1024 / 1024).toFixed(2) + ' MB'],
+                      [
+                        'External',
+                        (memUsage.external / 1024 / 1024).toFixed(2) + ' MB'
+                      ]
+                    ]
+                      .map(
+                        ([k, v]) => `
                         <div class="flex justify-between items-center py-2 border-b border-slate-800/50">
                             <span class="text-[10px] font-black text-slate-500 uppercase tracking-widest">${k}</span>
                             <span class="text-xs font-bold text-[#FFAA00] mono">${v}</span>
                         </div>
-                    `).join('')}
+                    `
+                      )
+                      .join('')}
 
                     <div class="pt-2">
                         <p class="text-[9px] text-slate-600 uppercase font-bold tracking-widest mb-2">Heap Usage</p>
                         <div class="w-full bg-slate-800 rounded-full h-2">
-                            <div class="bg-[#FFAA00] h-2 rounded-full transition-all" style="width: ${Math.min(100, (memUsage.heapUsed / memUsage.heapTotal * 100)).toFixed(1)}%"></div>
+                            <div class="bg-[#FFAA00] h-2 rounded-full transition-all" style="width: ${Math.min(
+                              100,
+                              (memUsage.heapUsed / memUsage.heapTotal) * 100
+                            ).toFixed(1)}%"></div>
                         </div>
-                        <p class="text-[9px] text-slate-600 mt-1">${(memUsage.heapUsed / memUsage.heapTotal * 100).toFixed(1)}% used</p>
+                        <p class="text-[9px] text-slate-600 mt-1">${(
+                          (memUsage.heapUsed / memUsage.heapTotal) *
+                          100
+                        ).toFixed(1)}% used</p>
                     </div>
                 </div>
 
@@ -3293,117 +3817,160 @@ app.get('/admin/system', requireAdmin, (req, res) => {
                     <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Discord Client</h3>
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                         ${[
-                            ['Ping', client.ws.ping + 'ms'],
-                            ['Guilds', client.guilds.cache.size],
-                            ['Cached Users', client.users.cache.size],
-                            ['Cached Channels', client.channels.cache.size],
-                        ].map(([k, v]) => `
+                          ['Ping', client.ws.ping + 'ms'],
+                          ['Guilds', client.guilds.cache.size],
+                          ['Cached Users', client.users.cache.size],
+                          ['Cached Channels', client.channels.cache.size]
+                        ]
+                          .map(
+                            ([k, v]) => `
                             <div class="bg-slate-800/50 rounded-xl p-4">
                                 <p class="text-2xl font-black text-white">${v}</p>
                                 <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider mt-1">${k}</p>
                             </div>
-                        `).join('')}
+                        `
+                          )
+                          .join('')}
                     </div>
                 </div>
             </div>
         </div>
         </body></html>
-    `);
-});
+    `)
+})
 
 // ADMIN action routes
 app.get('/admin/globalunban/:userId', requireAdmin, (req, res) => {
-    db.prepare("DELETE FROM banned_users WHERE user_id = ?").run(req.params.userId);
-    res.redirect('/admin/users');
-});
+  db.prepare('DELETE FROM banned_users WHERE user_id = ?').run(
+    req.params.userId
+  )
+  res.redirect('/admin/users')
+})
 
 app.get('/admin/unblock/:guildId/:userId', requireAdmin, (req, res) => {
-    db.prepare("DELETE FROM blocked_users WHERE guild_id = ? AND user_id = ?").run(req.params.guildId, req.params.userId);
-    res.redirect('/admin/users');
-});
+  db.prepare(
+    'DELETE FROM blocked_users WHERE guild_id = ? AND user_id = ?'
+  ).run(req.params.guildId, req.params.userId)
+  res.redirect('/admin/users')
+})
 
 app.get('/admin/unsuspend/:guildId/:userId', requireAdmin, (req, res) => {
-    db.prepare("DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?").run(req.params.guildId, req.params.userId);
-    res.redirect('/admin/users');
-});
+  db.prepare(
+    'DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?'
+  ).run(req.params.guildId, req.params.userId)
+  res.redirect('/admin/users')
+})
 
-app.get("/metrics/leaderboard", async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/metrics/leaderboard', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    const managedGuildIds = getManagedGuilds(req.user.id);
-    if (managedGuildIds.length === 0) return res.redirect("/metrics");
+  const managedGuildIds = getManagedGuilds(req.user.id)
+  if (managedGuildIds.length === 0) return res.redirect('/metrics')
 
-    const selectedGuildId = req.query.guild || managedGuildIds[0];
+  const selectedGuildId = req.query.guild || managedGuildIds[0]
 
-    const responseTimes = db.prepare(
-        "SELECT first_responder_id FROM thread_tracking WHERE guild_id = ? AND first_responder_id IS NOT NULL"
-    ).all(selectedGuildId);
+  const responseTimes = db
+    .prepare(
+      'SELECT first_responder_id FROM thread_tracking WHERE guild_id = ? AND first_responder_id IS NOT NULL'
+    )
+    .all(selectedGuildId)
 
-    const counts = {};
-    for (const t of responseTimes) counts[t.first_responder_id] = (counts[t.first_responder_id] || 0) + 1;
+  const counts = {}
+  for (const t of responseTimes)
+    counts[t.first_responder_id] = (counts[t.first_responder_id] || 0) + 1
 
-    const leaderboard = Object.entries(counts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([uid, count]) => ({
-            uid, count,
-            name: resolveUserName(uid),
-            avatar: resolveUserAvatar(uid),
-            profile: db.prepare("SELECT * FROM helper_profiles WHERE user_id = ?").get(uid) || null
-        }));
+  const leaderboard = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([uid, count]) => ({
+      uid,
+      count,
+      name: resolveUserName(uid),
+      avatar: resolveUserAvatar(uid),
+      profile:
+        db
+          .prepare('SELECT * FROM helper_profiles WHERE user_id = ?')
+          .get(uid) || null
+    }))
 
-    const myProfile = db.prepare("SELECT * FROM helper_profiles WHERE user_id = ?").get(req.user.id);
-    const myRank = leaderboard.findIndex(r => r.uid === req.user.id) + 1;
+  const myProfile = db
+    .prepare('SELECT * FROM helper_profiles WHERE user_id = ?')
+    .get(req.user.id)
+  const myRank = leaderboard.findIndex(r => r.uid === req.user.id) + 1
 
-    const gradientPresets = [
-        // Solid-style
-        { label: 'Gold', value: 'linear-gradient(135deg, #FFAA00, #ff6b00)' },
-        { label: 'Ocean', value: 'linear-gradient(135deg, #0ea5e9, #6366f1)' },
-        { label: 'Forest', value: 'linear-gradient(135deg, #10b981, #059669)' },
-        { label: 'Rose', value: 'linear-gradient(135deg, #f43f5e, #ec4899)' },
-        { label: 'Violet', value: 'linear-gradient(135deg, #8b5cf6, #6366f1)' },
-        { label: 'Slate', value: 'linear-gradient(135deg, #334155, #0f172a)' },
-        { label: 'Crimson', value: 'linear-gradient(135deg, #dc2626, #7f1d1d)' },
-        { label: 'Cyan', value: 'linear-gradient(135deg, #06b6d4, #0284c7)' },
-        // Multi-stop
-        { label: 'Sunset', value: 'linear-gradient(135deg, #f97316, #ec4899, #8b5cf6)' },
-        { label: 'Aurora', value: 'linear-gradient(135deg, #10b981, #06b6d4, #8b5cf6)' },
-        { label: 'Fire', value: 'linear-gradient(135deg, #fbbf24, #ef4444, #7f1d1d)' },
-        { label: 'Galaxy', value: 'linear-gradient(135deg, #1e1b4b, #4c1d95, #0ea5e9)' },
-        { label: 'Mint', value: 'linear-gradient(135deg, #ecfdf5, #6ee7b7, #059669)' },
-        { label: 'Midnight', value: 'linear-gradient(135deg, #0f172a, #1e3a5f, #0ea5e9)' },
-        { label: 'Candy', value: 'linear-gradient(135deg, #f9a8d4, #a78bfa, #6ee7b7)' },
-        { label: 'Lava', value: 'linear-gradient(135deg, #450a0a, #dc2626, #fbbf24)' },
-    ];
+  const gradientPresets = [
+    // Solid-style
+    { label: 'Gold', value: 'linear-gradient(135deg, #FFAA00, #ff6b00)' },
+    { label: 'Ocean', value: 'linear-gradient(135deg, #0ea5e9, #6366f1)' },
+    { label: 'Forest', value: 'linear-gradient(135deg, #10b981, #059669)' },
+    { label: 'Rose', value: 'linear-gradient(135deg, #f43f5e, #ec4899)' },
+    { label: 'Violet', value: 'linear-gradient(135deg, #8b5cf6, #6366f1)' },
+    { label: 'Slate', value: 'linear-gradient(135deg, #334155, #0f172a)' },
+    { label: 'Crimson', value: 'linear-gradient(135deg, #dc2626, #7f1d1d)' },
+    { label: 'Cyan', value: 'linear-gradient(135deg, #06b6d4, #0284c7)' },
+    // Multi-stop
+    {
+      label: 'Sunset',
+      value: 'linear-gradient(135deg, #f97316, #ec4899, #8b5cf6)'
+    },
+    {
+      label: 'Aurora',
+      value: 'linear-gradient(135deg, #10b981, #06b6d4, #8b5cf6)'
+    },
+    {
+      label: 'Fire',
+      value: 'linear-gradient(135deg, #fbbf24, #ef4444, #7f1d1d)'
+    },
+    {
+      label: 'Galaxy',
+      value: 'linear-gradient(135deg, #1e1b4b, #4c1d95, #0ea5e9)'
+    },
+    {
+      label: 'Mint',
+      value: 'linear-gradient(135deg, #ecfdf5, #6ee7b7, #059669)'
+    },
+    {
+      label: 'Midnight',
+      value: 'linear-gradient(135deg, #0f172a, #1e3a5f, #0ea5e9)'
+    },
+    {
+      label: 'Candy',
+      value: 'linear-gradient(135deg, #f9a8d4, #a78bfa, #6ee7b7)'
+    },
+    {
+      label: 'Lava',
+      value: 'linear-gradient(135deg, #450a0a, #dc2626, #fbbf24)'
+    }
+  ]
 
-    const badgeOptions = [
-        { label: 'None', value: '' },
-        { label: 'Star', value: '⭐' },
-        { label: 'Fire', value: '🔥' },
-        { label: 'Crown', value: '👑' },
-        { label: 'Lightning', value: '⚡' },
-        { label: 'Diamond', value: '💎' },
-        { label: 'Rocket', value: '🚀' },
-        { label: 'Shield', value: '🛡️' },
-        { label: 'Sword', value: '⚔️' },
-        { label: 'Trophy', value: '🏆' },
-        { label: 'Ghost', value: '👻' },
-        { label: 'Robot', value: '🤖' },
-        { label: 'Alien', value: '👾' },
-        { label: 'Ninja', value: '🥷' },
-        { label: 'Wizard', value: '🧙' },
-        { label: 'Custom', value: 'custom' },
-    ];
+  const badgeOptions = [
+    { label: 'None', value: '' },
+    { label: 'Star', value: '⭐' },
+    { label: 'Fire', value: '🔥' },
+    { label: 'Crown', value: '👑' },
+    { label: 'Lightning', value: '⚡' },
+    { label: 'Diamond', value: '💎' },
+    { label: 'Rocket', value: '🚀' },
+    { label: 'Shield', value: '🛡️' },
+    { label: 'Sword', value: '⚔️' },
+    { label: 'Trophy', value: '🏆' },
+    { label: 'Ghost', value: '👻' },
+    { label: 'Robot', value: '🤖' },
+    { label: 'Alien', value: '👾' },
+    { label: 'Ninja', value: '🥷' },
+    { label: 'Wizard', value: '🧙' },
+    { label: 'Custom', value: 'custom' }
+  ]
 
-    const animationOptions = [
-        { label: 'None', value: 'none' },
-        { label: 'Shimmer', value: 'shimmer' },
-        { label: 'Pulse', value: 'pulse' },
-        { label: 'Glow', value: 'glow' },
-    ];
+  const animationOptions = [
+    { label: 'None', value: 'none' },
+    { label: 'Shimmer', value: 'shimmer' },
+    { label: 'Pulse', value: 'pulse' },
+    { label: 'Glow', value: 'glow' }
+  ]
 
-    res.send(`
+  res.send(`
         <html>
-        ${getHead("Impulse | Helper Leaderboard")}
+        ${getHead('Impulse | Helper Leaderboard')}
         <style>
             @keyframes shimmer {
                 0% { background-position: -200% center; }
@@ -3430,7 +3997,7 @@ app.get("/metrics/leaderboard", async (req, res) => {
         </style>
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-5xl mx-auto">
-            ${getNav("metrics", req.user)}
+            ${getNav('metrics', req.user)}
 
             <div class="flex items-center justify-between mb-8">
                 <div>
@@ -3441,7 +4008,9 @@ app.get("/metrics/leaderboard", async (req, res) => {
             </div>
 
             <!-- Profile Editor (only shows if logged in user is on the leaderboard) -->
-            ${myRank > 0 ? `
+            ${
+              myRank > 0
+                ? `
             <div class="bg-slate-900/40 border border-[#FFAA00]/20 rounded-2xl p-6 mb-8">
                 <h3 class="text-[10px] font-black text-[#FFAA00] uppercase tracking-widest mb-5">✨ Your Rank Card — Customize It</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -3452,12 +4021,17 @@ app.get("/metrics/leaderboard", async (req, res) => {
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Display Name</label>
-                                <input name="display_name" value="${sanitize(myProfile?.display_name || resolveUserName(req.user.id))}"
+                                <input name="display_name" value="${sanitize(
+                                  myProfile?.display_name ||
+                                    resolveUserName(req.user.id)
+                                )}"
                                     class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
                             </div>
                             <div>
                                 <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Bio <span class="text-slate-600 normal-case font-normal">(80 chars)</span></label>
-                                <input name="bio" maxlength="80" value="${sanitize(myProfile?.bio || '')}" placeholder="A short tagline..."
+                                <input name="bio" maxlength="80" value="${sanitize(
+                                  myProfile?.bio || ''
+                                )}" placeholder="A short tagline..."
                                     class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
                             </div>
                         </div>
@@ -3465,17 +4039,34 @@ app.get("/metrics/leaderboard", async (req, res) => {
                         <div>
                             <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Badge</label>
                             <div class="grid grid-cols-5 gap-1.5 mb-2">
-                                ${badgeOptions.filter(b => b.value !== 'custom').map(b => `
-                                    <button type="button" onclick="setBadge('${b.value}')"
+                                ${badgeOptions
+                                  .filter(b => b.value !== 'custom')
+                                  .map(
+                                    b => `
+                                    <button type="button" onclick="setBadge('${
+                                      b.value
+                                    }')"
                                         title="${b.label}"
                                         class="badge-btn h-9 rounded-lg border-2 text-lg flex items-center justify-center transition cursor-pointer
-                                               ${(myProfile?.badge || '') === b.value ? 'border-[#FFAA00] bg-[#FFAA00]/10' : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'}"
+                                               ${
+                                                 (myProfile?.badge || '') ===
+                                                 b.value
+                                                   ? 'border-[#FFAA00] bg-[#FFAA00]/10'
+                                                   : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'
+                                               }"
                                         data-value="${b.value}">
-                                        ${b.value || '<span class="text-slate-600 text-xs font-bold">∅</span>'}
+                                        ${
+                                          b.value ||
+                                          '<span class="text-slate-600 text-xs font-bold">∅</span>'
+                                        }
                                     </button>
-                                `).join('')}
+                                `
+                                  )
+                                  .join('')}
                             </div>
-                            <input type="hidden" name="badge" id="badgeInput" value="${sanitize(myProfile?.badge || '')}">
+                            <input type="hidden" name="badge" id="badgeInput" value="${sanitize(
+                              myProfile?.badge || ''
+                            )}">
                             <div class="flex items-center gap-2 mt-1">
                                 <input type="text" id="customBadgeInput" maxlength="4" placeholder="Or type any emoji..."
                                     class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#FFAA00] outline-none">
@@ -3487,21 +4078,39 @@ app.get("/metrics/leaderboard", async (req, res) => {
                         <div>
                             <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Banner Style</label>
                             <div class="grid grid-cols-8 gap-1.5 mb-3">
-                                ${gradientPresets.map((g, idx) => `
-                                    <button type="button" onclick="setGradient('${g.value}')"
+                                ${gradientPresets
+                                  .map(
+                                    (g, idx) => `
+                                    <button type="button" onclick="setGradient('${
+                                      g.value
+                                    }')"
                                         class="gradient-btn h-8 rounded-lg border-2 transition cursor-pointer
-                                               ${(myProfile?.banner_gradient || '') === g.value ? 'border-white scale-110' : 'border-transparent hover:border-white/40 hover:scale-105'}"
-                                        style="background: ${g.value}" title="${g.label}" data-value="${g.value}"></button>
-                                `).join('')}
+                                               ${
+                                                 (myProfile?.banner_gradient ||
+                                                   '') === g.value
+                                                   ? 'border-white scale-110'
+                                                   : 'border-transparent hover:border-white/40 hover:scale-105'
+                                               }"
+                                        style="background: ${g.value}" title="${
+                                      g.label
+                                    }" data-value="${g.value}"></button>
+                                `
+                                  )
+                                  .join('')}
                             </div>
-                            <input type="hidden" name="banner_gradient" id="bannerGradientInput" value="${myProfile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)'}">
+                            <input type="hidden" name="banner_gradient" id="bannerGradientInput" value="${
+                              myProfile?.banner_gradient ||
+                              'linear-gradient(135deg, #1e293b, #0f172a)'
+                            }">
                         </div>
 
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Accent Color</label>
                                 <div class="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
-                                    <input type="color" name="banner_color" id="bannerColorPicker" value="${myProfile?.banner_color || '#FFAA00'}"
+                                    <input type="color" name="banner_color" id="bannerColorPicker" value="${
+                                      myProfile?.banner_color || '#FFAA00'
+                                    }"
                                         class="w-6 h-6 rounded cursor-pointer bg-transparent border-none">
                                     <span class="text-[9px] text-slate-500">Border + stat color</span>
                                 </div>
@@ -3510,9 +4119,18 @@ app.get("/metrics/leaderboard", async (req, res) => {
                                 <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Card Animation</label>
                                 <select name="banner_animation" id="animationSelect"
                                     class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
-                                    ${animationOptions.map(a => `
-                                        <option value="${a.value}" ${(myProfile?.banner_animation || 'none') === a.value ? 'selected' : ''}>${a.label}</option>
-                                    `).join('')}
+                                    ${animationOptions
+                                      .map(
+                                        a => `
+                                        <option value="${a.value}" ${
+                                          (myProfile?.banner_animation ||
+                                            'none') === a.value
+                                            ? 'selected'
+                                            : ''
+                                        }>${a.label}</option>
+                                    `
+                                      )
+                                      .join('')}
                                 </select>
                             </div>
                         </div>
@@ -3526,17 +4144,33 @@ app.get("/metrics/leaderboard", async (req, res) => {
                     <div>
                         <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Preview</p>
                         <div id="cardPreview" class="rounded-xl overflow-hidden border border-slate-800">
-                            <div id="previewBanner" class="h-16 w-full" style="background: ${myProfile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)'}"></div>
+                            <div id="previewBanner" class="h-16 w-full" style="background: ${
+                              myProfile?.banner_gradient ||
+                              'linear-gradient(135deg, #1e293b, #0f172a)'
+                            }"></div>
                             <div class="bg-slate-900/80 px-5 pb-4 pt-0 flex items-center justify-between">
                                 <div class="flex items-center gap-3 -mt-5">
-                                    <img src="${resolveUserAvatar(req.user.id)}" class="w-12 h-12 rounded-full border-2 border-slate-900">
+                                    <img src="${resolveUserAvatar(
+                                      req.user.id
+                                    )}" class="w-12 h-12 rounded-full border-2 border-slate-900">
                                     <div class="mt-5">
-                                        <p class="text-sm font-black text-white" id="previewName">${sanitize(myProfile?.display_name || resolveUserName(req.user.id))} <span id="previewBadge" class="text-base">${sanitize(myProfile?.badge || '')}</span></p>
-                                        <p class="text-[10px] text-slate-500 italic" id="previewBio">${sanitize(myProfile?.bio || '')}</p>
+                                        <p class="text-sm font-black text-white" id="previewName">${sanitize(
+                                          myProfile?.display_name ||
+                                            resolveUserName(req.user.id)
+                                        )} <span id="previewBadge" class="text-base">${sanitize(
+                    myProfile?.badge || ''
+                  )}</span></p>
+                                        <p class="text-[10px] text-slate-500 italic" id="previewBio">${sanitize(
+                                          myProfile?.bio || ''
+                                        )}</p>
                                     </div>
                                 </div>
                                 <div class="mt-5 text-right">
-                                    <p class="text-xl font-black" id="previewColor" style="color: ${myProfile?.banner_color || '#FFAA00'}">${myRank > 0 ? counts[req.user.id] || 0 : 0}</p>
+                                    <p class="text-xl font-black" id="previewColor" style="color: ${
+                                      myProfile?.banner_color || '#FFAA00'
+                                    }">${
+                    myRank > 0 ? counts[req.user.id] || 0 : 0
+                  }</p>
                                     <p class="text-[8px] text-slate-600 uppercase font-bold">responses</p>
                                     <p class="text-[9px] font-black text-slate-400 mt-1">Rank #${myRank}</p>
                                 </div>
@@ -3544,54 +4178,96 @@ app.get("/metrics/leaderboard", async (req, res) => {
                         </div>
                     </div>
                 </div>
-            </div>` : ''}
+            </div>`
+                : ''
+            }
 
             <!-- Full Leaderboard -->
             <div class="space-y-3">
-                ${leaderboard.map((r, i) => {
-                    const gradient = r.profile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)';
-                    const accentColor = r.profile?.banner_color || '#FFAA00';
-                    const badge = r.profile?.badge || '';
-                    const displayName = r.profile?.display_name || r.name;
-                    const anim = r.profile?.banner_animation || 'none';
-                    const animClass = anim !== 'none' ? `anim-${anim}` : '';
-                    const medals = ['🥇', '🥈', '🥉'];
-                    const isMe = r.uid === req.user.id;
+                ${leaderboard
+                  .map((r, i) => {
+                    const gradient =
+                      r.profile?.banner_gradient ||
+                      'linear-gradient(135deg, #1e293b, #0f172a)'
+                    const accentColor = r.profile?.banner_color || '#FFAA00'
+                    const badge = r.profile?.badge || ''
+                    const displayName = r.profile?.display_name || r.name
+                    const anim = r.profile?.banner_animation || 'none'
+                    const animClass = anim !== 'none' ? `anim-${anim}` : ''
+                    const medals = ['🥇', '🥈', '🥉']
+                    const isMe = r.uid === req.user.id
                     return `
-                    <div class="rounded-2xl overflow-hidden border transition ${isMe ? 'border-[#FFAA00]/40' : 'border-slate-800 hover:border-slate-700'} ${anim === 'glow' ? 'anim-glow' : ''} ${animClass}">
+                    <div class="rounded-2xl overflow-hidden border transition ${
+                      isMe
+                        ? 'border-[#FFAA00]/40'
+                        : 'border-slate-800 hover:border-slate-700'
+                    } ${anim === 'glow' ? 'anim-glow' : ''} ${animClass}">
                         <div class="card-banner h-10 w-full" style="background: ${gradient}"></div>
                         <div class="bg-slate-900/60 px-5 pb-4 pt-0 flex items-center justify-between">
                             <div class="flex items-center gap-4 -mt-5">
                                 <div class="relative shrink-0">
-                                    <img src="${r.avatar}" class="w-12 h-12 rounded-full border-2 border-slate-900">
-                                    <span class="absolute -top-1 -right-1 text-sm">${medals[i] || ''}</span>
+                                    <img src="${
+                                      r.avatar
+                                    }" class="w-12 h-12 rounded-full border-2 border-slate-900">
+                                    <span class="absolute -top-1 -right-1 text-sm">${
+                                      medals[i] || ''
+                                    }</span>
                                 </div>
                                 <div class="mt-5">
                                     <div class="flex items-center gap-2">
-                                        <p class="text-sm font-black text-white">${sanitize(displayName)}</p>
-                                        ${badge ? `<span class="text-base">${sanitize(badge)}</span>` : ''}
-                                        ${i >= 3 ? `<span class="text-[9px] font-black text-slate-600">#${i + 1}</span>` : ''}
+                                        <p class="text-sm font-black text-white">${sanitize(
+                                          displayName
+                                        )}</p>
+                                        ${
+                                          badge
+                                            ? `<span class="text-base">${sanitize(
+                                                badge
+                                              )}</span>`
+                                            : ''
+                                        }
+                                        ${
+                                          i >= 3
+                                            ? `<span class="text-[9px] font-black text-slate-600">#${
+                                                i + 1
+                                              }</span>`
+                                            : ''
+                                        }
                                     </div>
-                                    ${r.profile?.bio ? `<p class="text-[10px] text-slate-500 italic">${sanitize(r.profile.bio)}</p>` : ''}
+                                    ${
+                                      r.profile?.bio
+                                        ? `<p class="text-[10px] text-slate-500 italic">${sanitize(
+                                            r.profile.bio
+                                          )}</p>`
+                                        : ''
+                                    }
                                 </div>
                             </div>
                             <div class="mt-5 flex items-center gap-4">
                                 <div class="text-right">
-                                    <p class="text-2xl font-black" style="color: ${accentColor}">${r.count}</p>
+                                    <p class="text-2xl font-black" style="color: ${accentColor}">${
+                      r.count
+                    }</p>
                                     <p class="text-[8px] text-slate-600 uppercase font-bold">first responses</p>
                                 </div>
                                 <div class="w-20 bg-slate-800 rounded-full h-2 hidden md:block">
-                                    <div class="h-2 rounded-full transition-all" style="width: ${Math.round((r.count / leaderboard[0].count) * 100)}%; background: ${accentColor}"></div>
+                                    <div class="h-2 rounded-full transition-all" style="width: ${Math.round(
+                                      (r.count / leaderboard[0].count) * 100
+                                    )}%; background: ${accentColor}"></div>
                                 </div>
                             </div>
                         </div>
-                    </div>`;
-                }).join('')}
-                ${leaderboard.length === 0 ? `
+                    </div>`
+                  })
+                  .join('')}
+                ${
+                  leaderboard.length === 0
+                    ? `
                     <div class="text-center py-20">
                         <p class="text-slate-600 text-sm font-bold uppercase tracking-widest">No response data yet</p>
                         <p class="text-slate-700 text-xs mt-2">Rankings populate as helpers respond to threads</p>
-                    </div>` : ''}
+                    </div>`
+                    : ''
+                }
             </div>
         </div>
 
@@ -3646,24 +4322,38 @@ app.get("/metrics/leaderboard", async (req, res) => {
             });
         </script>
         </body></html>
-    `);
-});
+    `)
+})
 
-app.post("/metrics/leaderboard/profile", express.urlencoded({ extended: true }), async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.post(
+  '/metrics/leaderboard/profile',
+  express.urlencoded({ extended: true }),
+  async (req, res) => {
+    if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    const { display_name, bio, badge, banner_gradient, banner_color, banner_animation, guild } = req.body;
+    const {
+      display_name,
+      bio,
+      badge,
+      banner_gradient,
+      banner_color,
+      banner_animation,
+      guild
+    } = req.body
 
     // Validate — must be on the leaderboard to save a profile
-    const hasResponded = db.prepare(
-        "SELECT 1 FROM thread_tracking WHERE first_responder_id = ? LIMIT 1"
-    ).get(req.user.id);
+    const hasResponded = db
+      .prepare(
+        'SELECT 1 FROM thread_tracking WHERE first_responder_id = ? LIMIT 1'
+      )
+      .get(req.user.id)
 
     if (!hasResponded) {
-        return res.redirect(`/metrics/leaderboard?guild=${guild || ''}`);
+      return res.redirect(`/metrics/leaderboard?guild=${guild || ''}`)
     }
 
-    db.prepare(`
+    db.prepare(
+      `
         INSERT INTO helper_profiles (user_id, display_name, bio, badge, banner_gradient, banner_color, banner_animation, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
@@ -3674,107 +4364,156 @@ app.post("/metrics/leaderboard/profile", express.urlencoded({ extended: true }),
             banner_color = excluded.banner_color,
             banner_animation = excluded.banner_animation,
             updated_at = excluded.updated_at
-    `).run(
-        req.user.id,
-        sanitize(display_name?.slice(0, 32) || ''),
-        sanitize(bio?.slice(0, 80) || ''),
-        sanitize(badge?.slice(0, 4) || ''),
-        banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)',
-        banner_color || '#FFAA00',
-        ['none', 'shimmer', 'pulse', 'glow'].includes(banner_animation) ? banner_animation : 'none',
-        Date.now()
-    );
+    `
+    ).run(
+      req.user.id,
+      sanitize(display_name?.slice(0, 32) || ''),
+      sanitize(bio?.slice(0, 80) || ''),
+      sanitize(badge?.slice(0, 4) || ''),
+      banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)',
+      banner_color || '#FFAA00',
+      ['none', 'shimmer', 'pulse', 'glow'].includes(banner_animation)
+        ? banner_animation
+        : 'none',
+      Date.now()
+    )
 
-    res.redirect(`/metrics/leaderboard?guild=${guild || ''}`);
-});
+    res.redirect(`/metrics/leaderboard?guild=${guild || ''}`)
+  }
+)
 
-app.get("/metrics", async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/metrics', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    const managedGuildIds = getManagedGuilds(req.user.id);
-    if (managedGuildIds.length === 0) return res.send(getErrorPage("No Access", "No managed servers found."));
+  const managedGuildIds = getManagedGuilds(req.user.id)
+  if (managedGuildIds.length === 0)
+    return res.send(getErrorPage('No Access', 'No managed servers found.'))
 
-    const selectedGuildId = req.query.guild || managedGuildIds[0];
-    const guildNames = managedGuildIds.map(id => {
-        const g = client.guilds.cache.get(id);
-        return { id, name: g ? g.name : id };
-    });
+  const selectedGuildId = req.query.guild || managedGuildIds[0]
+  const guildNames = managedGuildIds.map(id => {
+    const g = client.guilds.cache.get(id)
+    return { id, name: g ? g.name : id }
+  })
 
-    // Only count responses under 24h — late responses are recorded but excluded from rankings
-    const responseTimes = db.prepare(`
+  // Only count responses under 24h — late responses are recorded but excluded from rankings
+  const responseTimes = db
+    .prepare(
+      `
         SELECT first_response_at, created_at, first_responder_id
         FROM thread_tracking 
         WHERE guild_id = ? 
         AND first_response_at IS NOT NULL 
         AND first_responder_id IS NOT NULL
         AND (first_response_at - created_at) <= 86400000
-    `).all(selectedGuildId);
+    `
+    )
+    .all(selectedGuildId)
 
-    const avgResponseMs = responseTimes.length > 0
-        ? responseTimes.reduce((a, t) => a + (t.first_response_at - t.created_at), 0) / responseTimes.length
-        : null;
+  const avgResponseMs =
+    responseTimes.length > 0
+      ? responseTimes.reduce(
+          (a, t) => a + (t.first_response_at - t.created_at),
+          0
+        ) / responseTimes.length
+      : null
 
-    const avgResponseDisplay = avgResponseMs === null ? 'No data yet'
-        : avgResponseMs < 3600000 ? `${Math.round(avgResponseMs / 60000)} minutes`
-        : avgResponseMs < 86400000 ? `${(avgResponseMs / 3600000).toFixed(1)} hours`
-        : `${(avgResponseMs / 86400000).toFixed(1)} days`;
+  const avgResponseDisplay =
+    avgResponseMs === null
+      ? 'No data yet'
+      : avgResponseMs < 3600000
+      ? `${Math.round(avgResponseMs / 60000)} minutes`
+      : avgResponseMs < 86400000
+      ? `${(avgResponseMs / 3600000).toFixed(1)} hours`
+      : `${(avgResponseMs / 86400000).toFixed(1)} days`
 
-    // Top responders
-    const responderCounts = {};
-    for (const t of responseTimes) {
-        if (t.first_responder_id) {
-            responderCounts[t.first_responder_id] = (responderCounts[t.first_responder_id] || 0) + 1;
-        }
+  // Top responders
+  const responderCounts = {}
+  for (const t of responseTimes) {
+    if (t.first_responder_id) {
+      responderCounts[t.first_responder_id] =
+        (responderCounts[t.first_responder_id] || 0) + 1
     }
-    const topResponders = Object.entries(responderCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([uid, count]) => {
-            const profile = db.prepare("SELECT * FROM helper_profiles WHERE user_id = ?").get(uid);
-            return {
-                uid,
-                count,
-                name: resolveUserName(uid),
-                avatar: resolveUserAvatar(uid),
-                profile: profile || null
-            };
-        });
+  }
+  const topResponders = Object.entries(responderCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([uid, count]) => {
+      const profile = db
+        .prepare('SELECT * FROM helper_profiles WHERE user_id = ?')
+        .get(uid)
+      return {
+        uid,
+        count,
+        name: resolveUserName(uid),
+        avatar: resolveUserAvatar(uid),
+        profile: profile || null
+      }
+    })
 
-    // Action counts for charts
-    const actionCounts = db.prepare(`
+  // Action counts for charts
+  const actionCounts = db
+    .prepare(
+      `
         SELECT action, COUNT(*) as count 
         FROM audit_logs 
         WHERE guild_id = ?
         GROUP BY action 
         ORDER BY count DESC
         LIMIT 12
-    `).all(selectedGuildId);
+    `
+    )
+    .all(selectedGuildId)
 
-    // Thread activity by day (last 30 days)
-    const dailyThreads = db.prepare(`
+  // Thread activity by day (last 30 days)
+  const dailyThreads = db
+    .prepare(
+      `
         SELECT DATE(timestamp) as day, COUNT(*) as count
         FROM audit_logs
         WHERE guild_id = ? AND action = 'GREET'
         AND timestamp >= datetime('now', '-30 days')
         GROUP BY DATE(timestamp)
         ORDER BY day ASC
-    `).all(selectedGuildId);
+    `
+    )
+    .all(selectedGuildId)
 
-    // Resolution stats
-    const totalResolved = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'RESOLVED'").get(selectedGuildId).c;
-    const totalAutoClose = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'AUTO_CLOSE'").get(selectedGuildId).c;
-    const totalGreets = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'GREET'").get(selectedGuildId).c;
-    const totalEscalations = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'ESCALATION'").get(selectedGuildId).c;
-    const totalSnippets = db.prepare("SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'SNIPPET'").get(selectedGuildId).c;
+  // Resolution stats
+  const totalResolved = db
+    .prepare(
+      "SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'RESOLVED'"
+    )
+    .get(selectedGuildId).c
+  const totalAutoClose = db
+    .prepare(
+      "SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'AUTO_CLOSE'"
+    )
+    .get(selectedGuildId).c
+  const totalGreets = db
+    .prepare(
+      "SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'GREET'"
+    )
+    .get(selectedGuildId).c
+  const totalEscalations = db
+    .prepare(
+      "SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'ESCALATION'"
+    )
+    .get(selectedGuildId).c
+  const totalSnippets = db
+    .prepare(
+      "SELECT COUNT(*) as c FROM audit_logs WHERE guild_id = ? AND action = 'SNIPPET'"
+    )
+    .get(selectedGuildId).c
 
-    const resolutionRate = totalGreets > 0 ? ((totalResolved / totalGreets) * 100).toFixed(1) : '0';
+  const resolutionRate =
+    totalGreets > 0 ? ((totalResolved / totalGreets) * 100).toFixed(1) : '0'
 
-    res.send(`
+  res.send(`
         <html>
-        ${getHead("Impulse | Metrics")}
+        ${getHead('Impulse | Metrics')}
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-7xl mx-auto">
-            ${getNav("metrics", req.user)}
+            ${getNav('metrics', req.user)}
 
             <div class="flex items-center justify-between mb-8">
                 <div>
@@ -3783,28 +4522,72 @@ app.get("/metrics", async (req, res) => {
                     </h1>
                     <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Analytics • Response Times • Activity</p>
                 </div>
-                ${guildNames.length > 1 ? `
+                ${
+                  guildNames.length > 1
+                    ? `
                 <select onchange="window.location='/metrics?guild='+this.value" 
                     class="bg-slate-900 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-lg outline-none focus:border-[#FFAA00]">
-                    ${guildNames.map(g => `<option value="${g.id}" ${g.id === selectedGuildId ? 'selected' : ''}>${sanitize(g.name)}</option>`).join('')}
-                </select>` : ''}
+                    ${guildNames
+                      .map(
+                        g =>
+                          `<option value="${g.id}" ${
+                            g.id === selectedGuildId ? 'selected' : ''
+                          }>${sanitize(g.name)}</option>`
+                      )
+                      .join('')}
+                </select>`
+                    : ''
+                }
             </div>
 
             <!-- Top Stats -->
             <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
                 ${[
-                    { label: 'Total Threads', value: totalGreets, sub: 'all time', color: 'amber' },
-                    { label: 'Resolved', value: totalResolved, sub: `${resolutionRate}% rate`, color: 'emerald' },
-                    { label: 'Auto-Closed', value: totalAutoClose, sub: 'inactivity', color: 'slate' },
-                    { label: 'Escalations', value: totalEscalations, sub: '24h+ unanswered', color: 'red' },
-                    { label: 'Snippet Uses', value: totalSnippets, sub: 'total', color: 'blue' },
-                ].map(s => `
+                  {
+                    label: 'Total Threads',
+                    value: totalGreets,
+                    sub: 'all time',
+                    color: 'amber'
+                  },
+                  {
+                    label: 'Resolved',
+                    value: totalResolved,
+                    sub: `${resolutionRate}% rate`,
+                    color: 'emerald'
+                  },
+                  {
+                    label: 'Auto-Closed',
+                    value: totalAutoClose,
+                    sub: 'inactivity',
+                    color: 'slate'
+                  },
+                  {
+                    label: 'Escalations',
+                    value: totalEscalations,
+                    sub: '24h+ unanswered',
+                    color: 'red'
+                  },
+                  {
+                    label: 'Snippet Uses',
+                    value: totalSnippets,
+                    sub: 'total',
+                    color: 'blue'
+                  }
+                ]
+                  .map(
+                    s => `
                     <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
-                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">${s.label}</p>
+                        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">${
+                          s.label
+                        }</p>
                         <p class="text-3xl font-black text-white">${s.value.toLocaleString()}</p>
-                        <p class="text-[9px] text-slate-600 uppercase font-bold mt-1">${s.sub}</p>
+                        <p class="text-[9px] text-slate-600 uppercase font-bold mt-1">${
+                          s.sub
+                        }</p>
                     </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -3814,68 +4597,116 @@ app.get("/metrics", async (req, res) => {
                     <div class="text-center py-4">
                         <p class="text-4xl font-black text-[#FFAA00] mb-2">${avgResponseDisplay}</p>
                         <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Average first helper response</p>
-                        <p class="text-[9px] text-slate-600 mt-1">Based on ${responseTimes.length} threads with responses</p>
+                        <p class="text-[9px] text-slate-600 mt-1">Based on ${
+                          responseTimes.length
+                        } threads with responses</p>
                     </div>
 
-                    ${topResponders.length > 0 ? `
+                    ${
+                      topResponders.length > 0
+                        ? `
                     <div class="mt-6">
                         <div class="flex items-center justify-between mb-3">
                             <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Top Responders</p>
                             <a href="/metrics/leaderboard?guild=${selectedGuildId}" class="text-[9px] font-black text-[#FFAA00] uppercase tracking-widest hover:underline">Full Board →</a>
                         </div>
                         <div class="space-y-2">
-                        ${topResponders.slice(0, 5).map((r, i) => {
-                            const gradient = r.profile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)';
-                            const badge = r.profile?.badge || '';
-                            const bio = r.profile?.bio || '';
+                        ${topResponders
+                          .slice(0, 5)
+                          .map((r, i) => {
+                            const gradient =
+                              r.profile?.banner_gradient ||
+                              'linear-gradient(135deg, #1e293b, #0f172a)'
+                            const badge = r.profile?.badge || ''
+                            const bio = r.profile?.bio || ''
                             return `
                             <div class="rounded-xl overflow-hidden border border-slate-800 hover:border-[#FFAA00]/30 transition group">
                                 <div class="h-8 w-full" style="background: ${gradient}"></div>
                                 <div class="bg-slate-900/60 px-4 pb-3 pt-0 flex items-center justify-between">
                                     <div class="flex items-center gap-3 -mt-4">
                                         <div class="relative">
-                                            <img src="${r.avatar}" class="w-10 h-10 rounded-full border-2 border-slate-900">
-                                            <span class="absolute -top-1 -left-1 text-[10px] font-black bg-slate-900 rounded-full w-5 h-5 flex items-center justify-center border border-slate-700 ${i === 0 ? 'text-[#FFAA00]' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-amber-700' : 'text-slate-600'}">${i + 1}</span>
+                                            <img src="${
+                                              r.avatar
+                                            }" class="w-10 h-10 rounded-full border-2 border-slate-900">
+                                            <span class="absolute -top-1 -left-1 text-[10px] font-black bg-slate-900 rounded-full w-5 h-5 flex items-center justify-center border border-slate-700 ${
+                                              i === 0
+                                                ? 'text-[#FFAA00]'
+                                                : i === 1
+                                                ? 'text-slate-400'
+                                                : i === 2
+                                                ? 'text-amber-700'
+                                                : 'text-slate-600'
+                                            }">${i + 1}</span>
                                         </div>
                                         <div class="mt-4">
-                                            <p class="text-xs font-black text-white">${sanitize(r.name)} ${badge ? `<span class="text-sm">${sanitize(badge)}</span>` : ''}</p>
-                                            ${bio ? `<p class="text-[9px] text-slate-500 italic truncate max-w-[180px]">${sanitize(bio)}</p>` : ''}
+                                            <p class="text-xs font-black text-white">${sanitize(
+                                              r.name
+                                            )} ${
+                              badge
+                                ? `<span class="text-sm">${sanitize(
+                                    badge
+                                  )}</span>`
+                                : ''
+                            }</p>
+                                            ${
+                                              bio
+                                                ? `<p class="text-[9px] text-slate-500 italic truncate max-w-[180px]">${sanitize(
+                                                    bio
+                                                  )}</p>`
+                                                : ''
+                                            }
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-3 mt-2">
                                         <div class="text-right">
-                                            <p class="text-lg font-black text-[#FFAA00]">${r.count}</p>
+                                            <p class="text-lg font-black text-[#FFAA00]">${
+                                              r.count
+                                            }</p>
                                             <p class="text-[8px] text-slate-600 uppercase font-bold">responses</p>
                                         </div>
                                         <div class="w-16 bg-slate-800 rounded-full h-1.5 hidden md:block">
-                                            <div class="h-1.5 rounded-full" style="width: ${Math.round((r.count / topResponders[0].count) * 100)}%; background: ${r.profile?.banner_color || '#FFAA00'}"></div>
+                                            <div class="h-1.5 rounded-full" style="width: ${Math.round(
+                                              (r.count /
+                                                topResponders[0].count) *
+                                                100
+                                            )}%; background: ${
+                              r.profile?.banner_color || '#FFAA00'
+                            }"></div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>`;
-                        }).join('')}
+                            </div>`
+                          })
+                          .join('')}
                         </div>
-                    </div>` : ''}
+                    </div>`
+                        : ''
+                    }
                 </div>
 
                 <!-- Action Breakdown -->
                 <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6">
                     <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-5">Action Breakdown</h3>
                     <div class="space-y-3">
-                        ${actionCounts.map(a => {
-                            const maxCount = actionCounts[0].count;
-                            const pct = Math.round((a.count / maxCount) * 100);
+                        ${actionCounts
+                          .map(a => {
+                            const maxCount = actionCounts[0].count
+                            const pct = Math.round((a.count / maxCount) * 100)
                             return `
                             <div>
                                 <div class="flex justify-between mb-1">
-                                    <span class="text-[10px] font-black text-slate-400 uppercase">${a.action.replace(/_/g, ' ')}</span>
+                                    <span class="text-[10px] font-black text-slate-400 uppercase">${a.action.replace(
+                                      /_/g,
+                                      ' '
+                                    )}</span>
                                     <span class="text-[10px] font-black text-white">${a.count.toLocaleString()}</span>
                                 </div>
                                 <div class="w-full bg-slate-800 rounded-full h-1.5">
                                     <div class="bg-[#FFAA00] h-1.5 rounded-full transition-all" style="width: ${pct}%"></div>
                                 </div>
-                            </div>`;
-                        }).join('')}
+                            </div>`
+                          })
+                          .join('')}
                     </div>
                 </div>
             </div>
@@ -3883,33 +4714,53 @@ app.get("/metrics", async (req, res) => {
             <!-- Daily Thread Activity -->
             <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-6">
                 <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6">New Threads — Last 30 Days</h3>
-                ${dailyThreads.length === 0 ? `
+                ${
+                  dailyThreads.length === 0
+                    ? `
                     <p class="text-center text-slate-600 py-8 text-xs italic">No thread activity recorded yet in the last 30 days.</p>
-                ` : `
+                `
+                    : `
                 <div class="flex items-end gap-1 h-32">
                     ${(() => {
-                        const maxVal = Math.max(...dailyThreads.map(d => d.count), 1);
-                        return dailyThreads.map(d => {
-                            const height = Math.max(4, Math.round((d.count / maxVal) * 100));
-                            return `
+                      const maxVal = Math.max(
+                        ...dailyThreads.map(d => d.count),
+                        1
+                      )
+                      return dailyThreads
+                        .map(d => {
+                          const height = Math.max(
+                            4,
+                            Math.round((d.count / maxVal) * 100)
+                          )
+                          return `
                             <div class="flex-1 flex flex-col items-center gap-1 group relative">
                                 <div class="absolute bottom-full mb-1 bg-slate-800 text-white text-[9px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
-                                    ${d.day}: ${d.count} thread${d.count !== 1 ? 's' : ''}
+                                    ${d.day}: ${d.count} thread${
+                            d.count !== 1 ? 's' : ''
+                          }
                                 </div>
                                 <div class="w-full bg-[#FFAA00]/80 hover:bg-[#FFAA00] rounded-sm transition-all" style="height: ${height}%"></div>
-                            </div>`;
-                        }).join('');
+                            </div>`
+                        })
+                        .join('')
                     })()}
                 </div>
                 <div class="flex justify-between mt-2">
-                    <span class="text-[9px] text-slate-600">${dailyThreads[0]?.day || ''}</span>
-                    <span class="text-[9px] text-slate-600">${dailyThreads[dailyThreads.length - 1]?.day || ''}</span>
-                </div>`}
+                    <span class="text-[9px] text-slate-600">${
+                      dailyThreads[0]?.day || ''
+                    }</span>
+                    <span class="text-[9px] text-slate-600">${
+                      dailyThreads[dailyThreads.length - 1]?.day || ''
+                    }</span>
+                </div>`
+                }
             </div>
 
             <!-- Active Escalations -->
             ${(() => {
-                const activeEscalations = db.prepare(`
+              const activeEscalations = db
+                .prepare(
+                  `
                     SELECT tt.thread_id, tt.guild_id, tt.created_at, tt.escalation_sent,
                            al.details
                     FROM thread_tracking tt
@@ -3921,326 +4772,455 @@ app.get("/metrics", async (req, res) => {
                     WHERE tt.guild_id = ? AND tt.escalation_sent = 1
                     ORDER BY tt.created_at ASC
                     LIMIT 20
-                `).all(selectedGuildId);
+                `
+                )
+                .all(selectedGuildId)
 
-                if (activeEscalations.length === 0) return '';
+              if (activeEscalations.length === 0) return ''
 
-                return `
+              return `
                 <div class="bg-slate-900/40 border border-red-900/30 rounded-2xl overflow-hidden mt-6">
                     <div class="p-5 border-b border-red-900/30 bg-red-900/10 flex items-center justify-between">
                         <div class="flex items-center gap-3">
                             <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
                             <h3 class="text-sm font-black text-red-400 uppercase tracking-tight">
-                                Needs Attention — ${activeEscalations.length} Unanswered Thread${activeEscalations.length !== 1 ? 's' : ''} (24h+)
+                                Needs Attention — ${
+                                  activeEscalations.length
+                                } Unanswered Thread${
+                activeEscalations.length !== 1 ? 's' : ''
+              } (24h+)
                             </h3>
                         </div>
                         <span class="text-[9px] text-red-500 font-bold uppercase tracking-widest">No helpers have responded</span>
                     </div>
                     <div class="divide-y divide-slate-800/40">
-                        ${activeEscalations.map(e => `
+                        ${activeEscalations
+                          .map(
+                            e => `
                             <div class="p-4 hover:bg-red-900/5 transition flex items-center justify-between gap-4">
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-xs font-bold text-slate-200 truncate">${sanitize(e.details?.split('|')[0]?.replace('Unanswered 24h+: ', '') || 'Unknown thread')}</p>
-                                    <p class="text-[10px] text-slate-500 mt-0.5">Opened <t:${Math.floor(e.created_at / 1000)}:R> • <t:${Math.floor(e.created_at / 1000)}:D></p>
+                                    <p class="text-xs font-bold text-slate-200 truncate">${sanitize(
+                                      e.details
+                                        ?.split('|')[0]
+                                        ?.replace('Unanswered 24h+: ', '') ||
+                                        'Unknown thread'
+                                    )}</p>
+                                    <p class="text-[10px] text-slate-500 mt-0.5">Opened <t:${Math.floor(
+                                      e.created_at / 1000
+                                    )}:R> • <t:${Math.floor(
+                              e.created_at / 1000
+                            )}:D></p>
                                 </div>
-                                <a href="https://discord.com/channels/${selectedGuildId}/${e.thread_id}" 
+                                <a href="https://discord.com/channels/${selectedGuildId}/${
+                              e.thread_id
+                            }" 
                                    target="_blank"
                                    class="shrink-0 text-[9px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 border border-red-900/40 hover:border-red-500/40 px-3 py-1.5 rounded-lg transition">
                                     View Thread →
                                 </a>
                             </div>
-                        `).join('')}
+                        `
+                          )
+                          .join('')}
                     </div>
-                </div>`;
+                </div>`
             })()}
 
         </div>
         </body></html>
-    `);
-});
+    `)
+})
 
 app.use((req, res) => {
   res
     .status(404)
     .send(
       getErrorPage(
-        "Page Not Found",
-        "The system module you requested does not exist or has been moved.",
-        "404"
+        'Page Not Found',
+        'The system module you requested does not exist or has been moved.',
+        '404'
       )
-    );
-});
+    )
+})
 
-app.get("/fun/delete/:id", async (req, res) => {
-    if (!req.isAuthenticated()) return res.redirect("/auth/discord");
+app.get('/fun/delete/:id', async (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/auth/discord')
 
-    const trigger = db.prepare("SELECT * FROM reaction_triggers WHERE id = ?").get(req.params.id);
-    if (!trigger) return res.redirect("/fun");
+  const trigger = db
+    .prepare('SELECT * FROM reaction_triggers WHERE id = ?')
+    .get(req.params.id)
+  if (!trigger) return res.redirect('/fun')
 
-    const managedGuilds = getManagedGuilds(req.user.id);
-    if (!managedGuilds.includes(trigger.guild_id)) {
-        return res.status(403).send(getErrorPage("Access Denied", "You don't have permission to delete this trigger."));
-    }
+  const managedGuilds = getManagedGuilds(req.user.id)
+  if (!managedGuilds.includes(trigger.guild_id)) {
+    return res
+      .status(403)
+      .send(
+        getErrorPage(
+          'Access Denied',
+          "You don't have permission to delete this trigger."
+        )
+      )
+  }
 
-    db.prepare("DELETE FROM reaction_triggers WHERE id = ?").run(req.params.id);
-    db.prepare("DELETE FROM triggered_messages WHERE trigger_id = ?").run(req.params.id);
+  db.prepare('DELETE FROM reaction_triggers WHERE id = ?').run(req.params.id)
+  db.prepare('DELETE FROM triggered_messages WHERE trigger_id = ?').run(
+    req.params.id
+  )
 
-    const redirectGuild = req.query.guild || trigger.guild_id;
-    res.redirect(`/fun?guild=${redirectGuild}`);
-});
+  const redirectGuild = req.query.guild || trigger.guild_id
+  res.redirect(`/fun?guild=${redirectGuild}`)
+})
 
-app.listen(3000, "0.0.0.0");
+app.listen(3000, '0.0.0.0')
 
 // --- BOT EVENTS ---
-const IMPULSE_COLOR = 0xffaa00;
+const IMPULSE_COLOR = 0xffaa00
 
-client.once("clientReady", async (c) => {
-  console.log(`✅ Logged in as ${c.user.tag}`);
+client.once('clientReady', async c => {
+  console.log(`✅ Logged in as ${c.user.tag}`)
 
   // ONE-TIME: Scan and track threads from the last 2 weeks
-  console.log("📊 Scanning existing threads from the last 2 weeks...");
-  const twoWeeksAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
-  const allSettings = db.prepare("SELECT * FROM guild_settings").all();
+  console.log('📊 Scanning existing threads from the last 2 weeks...')
+  const twoWeeksAgo = Date.now() - 14 * 24 * 60 * 60 * 1000
+  const allSettings = db.prepare('SELECT * FROM guild_settings').all()
 
   for (const settings of allSettings) {
     try {
-      const guild = client.guilds.cache.get(settings.guild_id);
-      if (!guild) continue;
+      const guild = client.guilds.cache.get(settings.guild_id)
+      if (!guild) continue
 
-      const forumChannel = await guild.channels.fetch(settings.forum_id).catch(() => null);
-      if (!forumChannel || !forumChannel.isThreadOnly()) continue;
+      const forumChannel = await guild.channels
+        .fetch(settings.forum_id)
+        .catch(() => null)
+      if (!forumChannel || !forumChannel.isThreadOnly()) continue
 
-      const threads = await forumChannel.threads.fetchActive();
-      const toTrack = [];
+      const threads = await forumChannel.threads.fetchActive()
+      const toTrack = []
 
       for (const [threadId, thread] of threads.threads) {
-        if (!thread.createdTimestamp || thread.createdTimestamp < twoWeeksAgo) continue;
-        if (thread.appliedTags.includes(settings.resolved_tag)) continue;
-        const existing = db.prepare("SELECT 1 FROM thread_tracking WHERE thread_id = ?").get(threadId);
-        if (!existing) toTrack.push({ threadId, thread });
+        if (!thread.createdTimestamp || thread.createdTimestamp < twoWeeksAgo)
+          continue
+        if (thread.appliedTags.includes(settings.resolved_tag)) continue
+        const existing = db
+          .prepare('SELECT 1 FROM thread_tracking WHERE thread_id = ?')
+          .get(threadId)
+        if (!existing) toTrack.push({ threadId, thread })
       }
 
-      console.log(`📋 ${guild.name}: ${toTrack.length} new threads to register`);
+      console.log(`📋 ${guild.name}: ${toTrack.length} new threads to register`)
 
       // Insert in batches of 50 with a small delay between batches
       for (let i = 0; i < toTrack.length; i += 50) {
-        const batch = toTrack.slice(i, i + 50);
-        const insert = db.prepare("INSERT INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)");
-        const insertMany = db.transaction((items) => {
+        const batch = toTrack.slice(i, i + 50)
+        const insert = db.prepare(
+          'INSERT INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)'
+        )
+        const insertMany = db.transaction(items => {
           for (const { threadId, thread } of items) {
-            insert.run(threadId, settings.guild_id, thread.createdTimestamp || Date.now());
+            insert.run(
+              threadId,
+              settings.guild_id,
+              thread.createdTimestamp || Date.now()
+            )
           }
-        });
-        insertMany(batch);
-        if (i + 50 < toTrack.length) await sleep(500);
+        })
+        insertMany(batch)
+        if (i + 50 < toTrack.length) await sleep(500)
       }
 
-      console.log(`✅ ${guild.name}: registered ${toTrack.length} threads`);
+      console.log(`✅ ${guild.name}: registered ${toTrack.length} threads`)
     } catch (error) {
-      console.error(`Error scanning guild ${settings.guild_id}:`, error);
+      console.error(`Error scanning guild ${settings.guild_id}:`, error)
     }
   }
-  console.log("✅ Initial thread scan complete!");
+  console.log('✅ Initial thread scan complete!')
 
   // Timer for locking resolved threads (every 1 minute)
   setInterval(async () => {
     const rows = db
-      .prepare("SELECT * FROM pending_locks WHERE lock_at <= ?")
-      .all(Date.now());
+      .prepare('SELECT * FROM pending_locks WHERE lock_at <= ?')
+      .all(Date.now())
     for (const row of rows) {
-      const settings = getSettings(row.guild_id);
-      if (!settings) continue;
+      const settings = getSettings(row.guild_id)
+      if (!settings) continue
       try {
-        const thread = await client.channels.fetch(row.thread_id);
+        const thread = await client.channels.fetch(row.thread_id)
         if (thread) {
-          await thread.setAppliedTags([settings.resolved_tag]);
-          await thread.setLocked(true);
+          await thread.setAppliedTags([settings.resolved_tag])
+          await thread.setLocked(true)
 
           const lockEmbed = new EmbedBuilder()
-            .setTitle("🔒 Thread Locked")
+            .setTitle('🔒 Thread Locked')
             .setDescription(
-              `This thread was marked as resolved and has now been locked as of <t:${Math.floor(Date.now() / 1000)}:F>. Thank you for using our support forum!`
+              `This thread was marked as resolved and has now been locked as of <t:${Math.floor(
+                Date.now() / 1000
+              )}:F>. Thank you for using our support forum!`
             )
             .setColor(IMPULSE_COLOR)
             .setTimestamp()
-            .setFooter({ text: "Impulse Bot • Automated Lock" });
+            .setFooter({ text: 'Impulse Bot • Automated Lock' })
 
-          await thread.send({ embeds: [lockEmbed] });
-          logAction(row.guild_id, "LOCK", `Locked thread: ${thread.name}`);
-          await logToDiscord(row.guild_id, "LOCK", `Thread auto-locked: **${thread.name}**`);
+          await thread.send({ embeds: [lockEmbed] })
+          logAction(row.guild_id, 'LOCK', `Locked thread: ${thread.name}`)
+          await logToDiscord(
+            row.guild_id,
+            'LOCK',
+            `Thread auto-locked: **${thread.name}**`
+          )
         }
       } catch (e) {
-        console.error("Lock error:", e);
+        console.error('Lock error:', e)
       }
-      db.prepare("DELETE FROM pending_locks WHERE thread_id = ?").run(
+      db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(
         row.thread_id
-      );
+      )
     }
-  }, 60000);
+  }, 60000)
 
   setInterval(async () => {
-    await checkStaleThreads();
-  }, 6 * 60 * 60 * 1000);
+    await checkStaleThreads()
+  }, 6 * 60 * 60 * 1000)
 
-  await checkStaleThreads();
-});
+  await checkStaleThreads()
+})
 
 // Sends messages in chunks to avoid Discord rate limits
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-async function processInChunks(items, handler, chunkSize = 5, delayMs = 1500) {
-    let processed = 0, failed = 0;
-    for (let i = 0; i < items.length; i += chunkSize) {
-        const chunk = items.slice(i, i + chunkSize);
-        await Promise.allSettled(chunk.map(async item => {
-            try { await handler(item); processed++; }
-            catch (e) { console.error('Chunk handler error:', e.message); failed++; }
-        }));
-        if (i + chunkSize < items.length) await sleep(delayMs);
-    }
-    return { processed, failed };
+async function sleep (ms) {
+  return new Promise(r => setTimeout(r, ms))
 }
 
-async function checkStaleThreads() {
-    console.log("🔍 Checking for stale threads...");
+async function processInChunks (items, handler, chunkSize = 5, delayMs = 1500) {
+  let processed = 0,
+    failed = 0
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize)
+    await Promise.allSettled(
+      chunk.map(async item => {
+        try {
+          await handler(item)
+          processed++
+        } catch (e) {
+          console.error('Chunk handler error:', e.message)
+          failed++
+        }
+      })
+    )
+    if (i + chunkSize < items.length) await sleep(delayMs)
+  }
+  return { processed, failed }
+}
 
-    const warningThreshold = Date.now() - 24 * 24 * 60 * 60 * 1000;
-    const closeThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
+async function checkStaleThreads () {
+  console.log('🔍 Checking for stale threads...')
 
-    // 1. WARNING PHASE
-    const threadsNeedingWarning = db.prepare(`
+  const warningThreshold = Date.now() - 24 * 24 * 60 * 60 * 1000
+  const closeThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
+
+  // 1. WARNING PHASE
+  const threadsNeedingWarning = db
+    .prepare(
+      `
         SELECT * FROM thread_tracking 
         WHERE created_at <= ? 
         AND stale_warning_sent = 0
         AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
-    `).all(warningThreshold, warningThreshold);
+    `
+    )
+    .all(warningThreshold, warningThreshold)
 
-    console.log(`⚠️  ${threadsNeedingWarning.length} threads need stale warnings`);
+  console.log(`⚠️  ${threadsNeedingWarning.length} threads need stale warnings`)
 
-    await processInChunks(threadsNeedingWarning, async (tracked) => {
-        const settings = getSettings(tracked.guild_id);
-        if (!settings) return;
+  await processInChunks(
+    threadsNeedingWarning,
+    async tracked => {
+      const settings = getSettings(tracked.guild_id)
+      if (!settings) return
 
-        const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
-        if (!thread || thread.locked || thread.archived) return;
-        if (thread.appliedTags.includes(settings.resolved_tag)) {
-            db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
-            return;
-        }
+      const thread = await client.channels
+        .fetch(tracked.thread_id)
+        .catch(() => null)
+      if (!thread || thread.locked || thread.archived) return
+      if (thread.appliedTags.includes(settings.resolved_tag)) {
+        db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(
+          tracked.thread_id
+        )
+        return
+      }
 
-        const closeTime = Math.floor((Date.now() + 6 * 60 * 60 * 1000) / 1000);
-        const warningEmbed = new EmbedBuilder()
-            .setTitle("⚠️ Thread Inactivity Warning")
-            .setDescription(
-                `Hey <@${thread.ownerId}>! This thread has been inactive since <t:${Math.floor(tracked.created_at / 1000)}:D> and will be automatically closed <t:${closeTime}:R> at <t:${closeTime}:t>.\n\n` +
-                `**To keep this thread open:**\n• Reply to this thread, OR\n• Use \`/cancel\` to renew it\n\n` +
-                `If you no longer need help, you can ignore this.`
-            )
-            .setColor(0xf59e0b)
-            .setTimestamp()
-            .setFooter({ text: "Impulse Bot • Stale Thread Warning" });
+      const closeTime = Math.floor((Date.now() + 6 * 60 * 60 * 1000) / 1000)
+      const warningEmbed = new EmbedBuilder()
+        .setTitle('⚠️ Thread Inactivity Warning')
+        .setDescription(
+          `Hey <@${
+            thread.ownerId
+          }>! This thread has been inactive since <t:${Math.floor(
+            tracked.created_at / 1000
+          )}:D> and will be automatically closed <t:${closeTime}:R> at <t:${closeTime}:t>.\n\n` +
+            `**To keep this thread open:**\n• Reply to this thread, OR\n• Use \`/cancel\` to renew it\n\n` +
+            `If you no longer need help, you can ignore this.`
+        )
+        .setColor(0xf59e0b)
+        .setTimestamp()
+        .setFooter({ text: 'Impulse Bot • Stale Thread Warning' })
 
-        await thread.send({ content: `<@${thread.ownerId}>`, embeds: [warningEmbed] });
-        db.prepare("UPDATE thread_tracking SET stale_warning_sent = 1 WHERE thread_id = ?").run(tracked.thread_id);
-        logAction(tracked.guild_id, "STALE_WARNING", `Sent stale warning for: ${thread.name}`);
-        console.log(`⚠️  Warned: ${thread.name}`);
-    }, 5, 1500);
+      await thread.send({
+        content: `<@${thread.ownerId}>`,
+        embeds: [warningEmbed]
+      })
+      db.prepare(
+        'UPDATE thread_tracking SET stale_warning_sent = 1 WHERE thread_id = ?'
+      ).run(tracked.thread_id)
+      logAction(
+        tracked.guild_id,
+        'STALE_WARNING',
+        `Sent stale warning for: ${thread.name}`
+      )
+      console.log(`⚠️  Warned: ${thread.name}`)
+    },
+    5,
+    1500
+  )
 
-    const escalationThreshold = Date.now() - 24 * 60 * 60 * 1000;
-    const threadsNeedingEscalation = db.prepare(`
+  const escalationThreshold = Date.now() - 24 * 60 * 60 * 1000
+  const threadsNeedingEscalation = db
+    .prepare(
+      `
         SELECT * FROM thread_tracking 
         WHERE created_at <= ? 
         AND escalation_sent = 0 
         AND stale_warning_sent = 0
         AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
-    `).all(escalationThreshold, escalationThreshold);
+    `
+    )
+    .all(escalationThreshold, escalationThreshold)
 
-    console.log(`🚨 ${threadsNeedingEscalation.length} threads need staff escalation`);
+  console.log(
+    `🚨 ${threadsNeedingEscalation.length} threads need staff escalation`
+  )
 
-    await processInChunks(threadsNeedingEscalation, async (tracked) => {
-        const settings = getSettings(tracked.guild_id);
-        if (!settings?.unanswered_tag) return;
+  await processInChunks(
+    threadsNeedingEscalation,
+    async tracked => {
+      const settings = getSettings(tracked.guild_id)
+      if (!settings?.unanswered_tag) return
 
-        const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
-        if (!thread || thread.locked || thread.archived) return;
-        if (!thread.appliedTags.includes(settings.unanswered_tag)) return;
+      const thread = await client.channels
+        .fetch(tracked.thread_id)
+        .catch(() => null)
+      if (!thread || thread.locked || thread.archived) return
+      if (!thread.appliedTags.includes(settings.unanswered_tag)) return
 
-        // Just log it — no pinging, visible in metrics tab
-        db.prepare("UPDATE thread_tracking SET escalation_sent = 1 WHERE thread_id = ?").run(tracked.thread_id);
-        logAction(
-            tracked.guild_id,
-            "ESCALATION",
-            `Unanswered 24h+: ${thread.name} | Owner: <@${thread.ownerId}> | Opened: <t:${Math.floor(tracked.created_at / 1000)}:R>`,
-            null, null, null, null,
-            tracked.thread_id, null
-        );
-        console.log(`📋 Logged escalation (no ping): ${thread.name}`);
-    }, 3, 1500);
+      // Just log it — no pinging, visible in metrics tab
+      db.prepare(
+        'UPDATE thread_tracking SET escalation_sent = 1 WHERE thread_id = ?'
+      ).run(tracked.thread_id)
+      logAction(
+        tracked.guild_id,
+        'ESCALATION',
+        `Unanswered 24h+: ${thread.name} | Owner: <@${
+          thread.ownerId
+        }> | Opened: <t:${Math.floor(tracked.created_at / 1000)}:R>`,
+        null,
+        null,
+        null,
+        null,
+        tracked.thread_id,
+        null
+      )
+      console.log(`📋 Logged escalation (no ping): ${thread.name}`)
+    },
+    3,
+    1500
+  )
 
-    // 3. AUTO-CLOSE PHASE
-    const threadsToClose = db.prepare(`
+  // 3. AUTO-CLOSE PHASE
+  const threadsToClose = db
+    .prepare(
+      `
         SELECT * FROM thread_tracking 
         WHERE created_at <= ?
         AND stale_warning_sent = 1
         AND (last_renewed_at IS NULL OR last_renewed_at <= ?)
-    `).all(closeThreshold, closeThreshold);
+    `
+    )
+    .all(closeThreshold, closeThreshold)
 
-    console.log(`🔒 ${threadsToClose.length} threads queued for auto-close`);
+  console.log(`🔒 ${threadsToClose.length} threads queued for auto-close`)
 
-    await processInChunks(threadsToClose, async (tracked) => {
-        const settings = getSettings(tracked.guild_id);
-        if (!settings) return;
+  await processInChunks(
+    threadsToClose,
+    async tracked => {
+      const settings = getSettings(tracked.guild_id)
+      if (!settings) return
 
-        const thread = await client.channels.fetch(tracked.thread_id).catch(() => null);
-        if (!thread || thread.locked || thread.archived) {
-            db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
-            return;
-        }
-        if (thread.appliedTags.includes(settings.resolved_tag)) {
-            db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
-            return;
-        }
+      const thread = await client.channels
+        .fetch(tracked.thread_id)
+        .catch(() => null)
+      if (!thread || thread.locked || thread.archived) {
+        db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(
+          tracked.thread_id
+        )
+        return
+      }
+      if (thread.appliedTags.includes(settings.resolved_tag)) {
+        db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(
+          tracked.thread_id
+        )
+        return
+      }
 
-        await thread.setLocked(true);
-        const autoCloseEmbed = new EmbedBuilder()
-        .setTitle("🔒 Thread Auto-Closed")
+      await thread.setLocked(true)
+      const autoCloseEmbed = new EmbedBuilder()
+        .setTitle('🔒 Thread Auto-Closed')
         .setDescription(
-          `This thread was opened <t:${Math.floor(tracked.created_at / 1000)}:R> and has been automatically closed due to inactivity. If you still need help, please create a new thread.`
+          `This thread was opened <t:${Math.floor(
+            tracked.created_at / 1000
+          )}:R> and has been automatically closed due to inactivity. If you still need help, please create a new thread.`
         )
         .setColor(0x6b7280)
         .setTimestamp()
-        .setFooter({ text: "Impulse Bot • Auto-Close" });
+        .setFooter({ text: 'Impulse Bot • Auto-Close' })
 
-        await thread.send({ embeds: [autoCloseEmbed] });
-        logAction(tracked.guild_id, "AUTO_CLOSE", `Auto-closed stale thread: ${thread.name}`);
-        db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(tracked.thread_id);
-        console.log(`🔒 Closed: ${thread.name}`);
-    }, 3, 2000);
+      await thread.send({ embeds: [autoCloseEmbed] })
+      logAction(
+        tracked.guild_id,
+        'AUTO_CLOSE',
+        `Auto-closed stale thread: ${thread.name}`
+      )
+      db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(
+        tracked.thread_id
+      )
+      console.log(`🔒 Closed: ${thread.name}`)
+    },
+    3,
+    2000
+  )
 
-    console.log("✅ Stale thread check complete!");
+  console.log('✅ Stale thread check complete!')
 }
 
-client.on("threadCreate", async (thread) => {
-  const settings = getSettings(thread.guildId);
-  if (!settings || thread.parentId !== settings.forum_id) return;
+client.on('threadCreate', async thread => {
+  const settings = getSettings(thread.guildId)
+  if (!settings || thread.parentId !== settings.forum_id) return
 
   db.prepare(
-    "INSERT OR REPLACE INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)"
-  ).run(thread.id, thread.guildId, Date.now());
+    'INSERT OR REPLACE INTO thread_tracking (thread_id, guild_id, created_at) VALUES (?, ?, ?)'
+  ).run(thread.id, thread.guildId, Date.now())
 
   if (settings.unanswered_tag) {
     try {
-      const currentTags = thread.appliedTags || [];
+      const currentTags = thread.appliedTags || []
       if (!currentTags.includes(settings.unanswered_tag)) {
-        await thread.setAppliedTags([...currentTags, settings.unanswered_tag]);
+        await thread.setAppliedTags([...currentTags, settings.unanswered_tag])
       }
     } catch (e) {
-      console.error("Error applying unanswered tag:", e);
+      console.error('Error applying unanswered tag:', e)
     }
   }
 
   const welcomeEmbed = new EmbedBuilder()
-    .setTitle("Welcome to the Command Help Thread!")
+    .setTitle('Welcome to the Command Help Thread!')
     .setDescription(
       `Hey <@${thread.ownerId}>!\n\n` +
         `**What happens next?**\n` +
@@ -4251,13 +5231,13 @@ client.on("threadCreate", async (thread) => {
     )
     .setColor(IMPULSE_COLOR)
     .setTimestamp()
-    .setFooter({ text: "Impulse Bot • Automated Greeting" });
+    .setFooter({ text: 'Impulse Bot • Automated Greeting' })
 
-  await thread.send({ embeds: [welcomeEmbed] });
+  await thread.send({ embeds: [welcomeEmbed] })
 
   logAction(
     thread.guildId,
-    "GREET",
+    'GREET',
     `Welcomed user in ${thread.name}`,
     null,
     null,
@@ -4265,20 +5245,20 @@ client.on("threadCreate", async (thread) => {
     null,
     thread.id,
     null
-  );
-});
+  )
+})
 
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (!message.channel.isThread()) return;
+client.on('messageCreate', async message => {
+  if (message.author.bot) return
+  if (!message.channel.isThread()) return
 
-  const settings = getSettings(message.guildId);
+  const settings = getSettings(message.guildId)
 
-  if (!settings || !settings.unanswered_tag) return;
-  if (message.channel.parentId !== settings.forum_id) return;
+  if (!settings || !settings.unanswered_tag) return
+  if (message.channel.parentId !== settings.forum_id) return
 
   try {
-    const currentTags = message.channel.appliedTags;
+    const currentTags = message.channel.appliedTags
 
     // Only remove unanswered tag if:
     // 1. The thread has the unanswered tag
@@ -4287,81 +5267,93 @@ client.on("messageCreate", async (message) => {
       currentTags.includes(settings.unanswered_tag) &&
       message.author.id !== message.channel.ownerId
     ) {
-      const newTags = currentTags.filter(
-        (tag) => tag !== settings.unanswered_tag
-      );
-      await message.channel.setAppliedTags(newTags);
+      const newTags = currentTags.filter(tag => tag !== settings.unanswered_tag)
+      await message.channel.setAppliedTags(newTags)
       // Reset escalation so if thread goes unanswered again it can re-escalate
-      db.prepare("UPDATE thread_tracking SET escalation_sent = 0 WHERE thread_id = ?").run(message.channel.id);
+      db.prepare(
+        'UPDATE thread_tracking SET escalation_sent = 0 WHERE thread_id = ?'
+      ).run(message.channel.id)
       logAction(
         message.guildId,
-        "ANSWERED",
+        'ANSWERED',
         `Removed unanswered tag from: ${message.channel.name}`
-      );
+      )
     }
   } catch (e) {
-    console.error("Error removing unanswered tag:", e);
+    console.error('Error removing unanswered tag:', e)
   }
 
   // Track first helper response time — only count if under 24 hours (avoids stale warning skew)
   if (message.author.id !== message.channel.ownerId) {
-    const tracked = db.prepare("SELECT * FROM thread_tracking WHERE thread_id = ?").get(message.channel.id);
+    const tracked = db
+      .prepare('SELECT * FROM thread_tracking WHERE thread_id = ?')
+      .get(message.channel.id)
     if (tracked && !tracked.first_response_at) {
-        const responseTimeMs = Date.now() - tracked.created_at;
-        const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-        if (responseTimeMs <= TWENTY_FOUR_HOURS) {
-            db.prepare("UPDATE thread_tracking SET first_response_at = ?, first_responder_id = ? WHERE thread_id = ?")
-                .run(Date.now(), message.author.id, message.channel.id);
-            console.log(`⏱️ First response in ${Math.round(responseTimeMs / 60000)}min for: ${message.channel.name}`);
-        } else {
-            // Still record who responded but mark it as unranked (null responder = not counted)
-            db.prepare("UPDATE thread_tracking SET first_response_at = ? WHERE thread_id = ?")
-                .run(Date.now(), message.channel.id);
-            console.log(`⏱️ Late response (${Math.round(responseTimeMs / 3600000)}h) — not counted for rankings: ${message.channel.name}`);
-        }
+      const responseTimeMs = Date.now() - tracked.created_at
+      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000
+      if (responseTimeMs <= TWENTY_FOUR_HOURS) {
+        db.prepare(
+          'UPDATE thread_tracking SET first_response_at = ?, first_responder_id = ? WHERE thread_id = ?'
+        ).run(Date.now(), message.author.id, message.channel.id)
+        console.log(
+          `⏱️ First response in ${Math.round(responseTimeMs / 60000)}min for: ${
+            message.channel.name
+          }`
+        )
+      } else {
+        // Still record who responded but mark it as unranked (null responder = not counted)
+        db.prepare(
+          'UPDATE thread_tracking SET first_response_at = ? WHERE thread_id = ?'
+        ).run(Date.now(), message.channel.id)
+        console.log(
+          `⏱️ Late response (${Math.round(
+            responseTimeMs / 3600000
+          )}h) — not counted for rankings: ${message.channel.name}`
+        )
+      }
     }
   }
 
   // Reset stale warning if thread owner replies
   if (message.author.id === message.channel.ownerId) {
     db.prepare(
-      "UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?"
-    ).run(Date.now(), message.channel.id);
+      'UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?'
+    ).run(Date.now(), message.channel.id)
   }
-});
+})
 
 // Thread Chain add Link reaction handler
-client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot) return;
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return
 
-  if (reaction.partial) await reaction.fetch().catch(() => null);
-  if (user.partial) await user.fetch().catch(() => null);
+  if (reaction.partial) await reaction.fetch().catch(() => null)
+  if (user.partial) await user.fetch().catch(() => null)
 
-  if (reaction.emoji.name !== "🔗") return;
-  if (!reaction.message.channel.isThread()) return;
+  if (reaction.emoji.name !== '🔗') return
+  if (!reaction.message.channel.isThread()) return
 
   const starterMessage = await reaction.message.channel
     .fetchStarterMessage()
-    .catch(() => null);
-  if (!starterMessage || starterMessage.id !== reaction.message.id) return;
+    .catch(() => null)
+  if (!starterMessage || starterMessage.id !== reaction.message.id) return
 
   // Check if this thread has a link
   const threadLink = db
-    .prepare("SELECT * FROM thread_links WHERE thread_id = ?")
-    .get(reaction.message.channel.id);
+    .prepare('SELECT * FROM thread_links WHERE thread_id = ?')
+    .get(reaction.message.channel.id)
 
-  if (!threadLink) return;
+  if (!threadLink) return
 
   // ONLY remove the reaction if we are actually processing a link delivery
   try {
-    await reaction.users.remove(user.id);
+    await reaction.users.remove(user.id)
   } catch (e) {
-    console.warn("Missing 'Manage Messages' permission to remove reaction.");
+    console.warn("Missing 'Manage Messages' permission to remove reaction.")
   }
   // Send DM to user
   try {
     const dmEmbed = new EmbedBuilder()
-      .setTitle("🔗 Thread Link")
+      .setTitle('🔗 Thread Link')
       .setDescription(
         `You've requested the link from the thread: **${reaction.message.channel.name}**\n\n` +
           `**Link:** ${threadLink.url}\n\n` +
@@ -4369,128 +5361,168 @@ client.on("messageReactionAdd", async (reaction, user) => {
       )
       .setColor(0x3b82f6)
       .setTimestamp()
-      .setFooter({ text: "Impulse Bot • Link System" });
+      .setFooter({ text: 'Impulse Bot • Link System' })
 
-    await user.send({ embeds: [dmEmbed] });
+    await user.send({ embeds: [dmEmbed] })
 
     logAction(
       threadLink.guild_id,
-      "LINK_ACCESSED",
+      'LINK_ACCESSED',
       `${user.username} accessed link in: ${reaction.message.channel.name}`,
       user.id,
       user.username,
       user.displayAvatarURL(),
-      "Reaction: 🔗",
+      'Reaction: 🔗',
       reaction.message.channel.id,
       null
-    );
+    )
   } catch (error) {
-    console.log(`User ${user.tag} has DMs disabled`);
+    console.log(`User ${user.tag} has DMs disabled`)
     // Fallback: Notify the user in the thread
-    const channel = reaction.message.channel;
+    const channel = reaction.message.channel
     const msg = await channel.send(
       `<@${user.id}>, I couldn't DM you! Please enable DMs in your privacy settings.`
-    );
-    setTimeout(() => msg.delete().catch(() => {}), 10000);
+    )
+    setTimeout(() => msg.delete().catch(() => {}), 10000)
   }
-});
+})
 
 // Reaction Trigger handler LColor
 client.on('messageReactionAdd', async (reaction, user) => {
-    if (reaction.partial) await reaction.fetch().catch(() => null);
-    
-    const { message, emoji } = reaction;
-    if (!message.guildId) return;
+  if (reaction.partial) await reaction.fetch().catch(() => null)
 
-    const settings = getSettings(message.guildId);
-    if (!settings?.fun_features_enabled) return;
+  const { message, emoji } = reaction
+  if (!message.guildId) return
 
-    const emojiId = emoji.id || emoji.name; // Works for custom and standard emojis
-    const authorId = message.author.id;
+  const settings = getSettings(message.guildId)
+  if (!settings?.fun_features_enabled) return
 
-    const triggers = db.prepare(`
+  const emojiId = emoji.id || emoji.name // Works for custom and standard emojis
+  const authorId = message.author.id
+
+  const triggers = db
+    .prepare(
+      `
         SELECT * FROM reaction_triggers 
         WHERE guild_id = ? AND target_user_id = ? AND reaction_id = ? AND enabled = 1
-    `).all(message.guildId, authorId, emojiId);
+    `
+    )
+    .all(message.guildId, authorId, emojiId)
 
-    for (const trigger of triggers) {
-        if (reaction.count >= trigger.trigger_count) {
-            // Check if we've already replied to THIS message for THIS trigger
-            const alreadyTriggered = db.prepare(`SELECT 1 FROM triggered_messages WHERE message_id = ? AND trigger_id = ?`)
-                .get(message.id, trigger.id);
+  for (const trigger of triggers) {
+    if (reaction.count >= trigger.trigger_count) {
+      // Check if we've already replied to THIS message for THIS trigger
+      const alreadyTriggered = db
+        .prepare(
+          `SELECT 1 FROM triggered_messages WHERE message_id = ? AND trigger_id = ?`
+        )
+        .get(message.id, trigger.id)
 
-            if (!alreadyTriggered) {
-                db.prepare(`INSERT INTO triggered_messages (message_id, trigger_id) VALUES (?, ?)`).run(message.id, trigger.id);
-                await message.reply(trigger.response_text);
-            }
-        }
+      if (!alreadyTriggered) {
+        db.prepare(
+          `INSERT INTO triggered_messages (message_id, trigger_id) VALUES (?, ?)`
+        ).run(message.id, trigger.id)
+        await message.reply(trigger.response_text)
+      }
     }
-});
+  }
+})
 
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return
 
-  const userId = interaction.user.id;
-  const userName = interaction.user.username;
-  const userAvatar = interaction.user.displayAvatarURL();
+  const userId = interaction.user.id
+  const userName = interaction.user.username
+  const userAvatar = interaction.user.displayAvatarURL()
 
   // GATE 1: Global blacklist check — runs before ANYTHING else
-  const globalBan = db.prepare("SELECT reason FROM banned_users WHERE user_id = ?").get(userId);
+  const globalBan = db
+    .prepare('SELECT reason FROM banned_users WHERE user_id = ?')
+    .get(userId)
   if (globalBan) {
     return interaction.reply({
-      content: `🚫 You have been globally blacklisted from using Impulse Bot.${globalBan.reason ? ` Reason: ${globalBan.reason}` : ''}`,
+      content: `🚫 You have been globally blacklisted from using Impulse Bot.${
+        globalBan.reason ? ` Reason: ${globalBan.reason}` : ''
+      }`,
       ephemeral: true
-    });
+    })
   }
 
-  const settings = getSettings(interaction.guildId);
+  const settings = getSettings(interaction.guildId)
 
   // GATE 2: Server block/suspend check — skip for moderation commands themselves
-  const modCommands = ['setup', 'blockuser', 'unblockuser', 'suspend', 'unsuspend', 'globalban', 'globalunban'];
+  const modCommands = [
+    'setup',
+    'blockuser',
+    'unblockuser',
+    'suspend',
+    'unsuspend',
+    'globalban',
+    'globalunban'
+  ]
   if (!modCommands.includes(interaction.commandName)) {
-    const blockCheck = isUserBlocked(userId, interaction.guildId);
+    const blockCheck = isUserBlocked(userId, interaction.guildId)
     if (blockCheck.blocked) {
-      return interaction.reply({ content: `🚫 ${blockCheck.reason}`, ephemeral: true });
+      return interaction.reply({
+        content: `🚫 ${blockCheck.reason}`,
+        ephemeral: true
+      })
     }
 
     // Cooldown check for spammable commands
-    const cooldownCommands = { 
-        snippet: [30, 5],        // 5 uses per 30s (was 3 per 15s)
-        reactmessage: [60, 3],   // 3 uses per 60s (was 2 per 30s)
-        link: [120, 3],          // 3 uses per 2min (was 2 per 60s)
-        duplicate: [60, 5],      // 5 uses per 60s (was 3 per 30s)
-        resolved: [30, 3],       // new — wasn't rate limited before
-        closethreads: [300, 2],  // new — bulk command, 2 per 5min
-    };
+    const cooldownCommands = {
+      snippet: [30, 5], // 5 uses per 30s (was 3 per 15s)
+      reactmessage: [60, 3], // 3 uses per 60s (was 2 per 30s)
+      link: [120, 3], // 3 uses per 2min (was 2 per 60s)
+      duplicate: [60, 5], // 5 uses per 60s (was 3 per 30s)
+      resolved: [30, 3], // new — wasn't rate limited before
+      closethreads: [300, 2] // new — bulk command, 2 per 5min
+    }
     if (cooldownCommands[interaction.commandName]) {
-      const [secs, max] = cooldownCommands[interaction.commandName];
-      const cd = checkCooldown(userId, interaction.guildId, interaction.commandName, secs, max);
+      const [secs, max] = cooldownCommands[interaction.commandName]
+      const cd = checkCooldown(
+        userId,
+        interaction.guildId,
+        interaction.commandName,
+        secs,
+        max
+      )
       if (cd.limited) {
         if (cd.suspended) {
-          logAction(interaction.guildId, "AUTO_SUSPEND", `Auto-suspended for spamming /${interaction.commandName}`, userId, userName, userAvatar, `/${interaction.commandName}`, null, null);
+          logAction(
+            interaction.guildId,
+            'AUTO_SUSPEND',
+            `Auto-suspended for spamming /${interaction.commandName}`,
+            userId,
+            userName,
+            userAvatar,
+            `/${interaction.commandName}`,
+            null,
+            null
+          )
         }
-        return interaction.reply({ content: cd.message, ephemeral: true });
+        return interaction.reply({ content: cd.message, ephemeral: true })
       }
     }
   }
 
-  if (interaction.commandName === "setup") {
+  if (interaction.commandName === 'setup') {
     if (
       !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
     ) {
       return interaction.reply({
-        content: "❌ **Access Denied:** Administrator permissions required.",
-        ephemeral: true,
-      });
+        content: '❌ **Access Denied:** Administrator permissions required.',
+        ephemeral: true
+      })
     }
 
-    const forum = interaction.options.getChannel("forum");
-    const resTag = interaction.options.getString("resolved_tag");
-    const dupTag = interaction.options.getString("duplicate_tag");
-    const unansTag = interaction.options.getString("unanswered_tag") || null;
-    const rawRoles = interaction.options.getString("helper_roles");
-    const cleanRoles = rawRoles.replace(/\s+/g, "");
-    const auditChannel = interaction.options.getChannel("audit_channel");
+    const forum = interaction.options.getChannel('forum')
+    const resTag = interaction.options.getString('resolved_tag')
+    const dupTag = interaction.options.getString('duplicate_tag')
+    const unansTag = interaction.options.getString('unanswered_tag') || null
+    const rawRoles = interaction.options.getString('helper_roles')
+    const cleanRoles = rawRoles.replace(/\s+/g, '')
+    const auditChannel = interaction.options.getChannel('audit_channel')
 
     db.prepare(
       `INSERT OR REPLACE INTO guild_settings (guild_id, guild_name, forum_id, resolved_tag, duplicate_tag, unanswered_tag, helper_role_id, audit_channel_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -4503,274 +5535,303 @@ client.on("interactionCreate", async (interaction) => {
       unansTag,
       cleanRoles,
       auditChannel?.id || null
-    );
+    )
 
     logAction(
       interaction.guildId,
-      "SETUP",
+      'SETUP',
       `Setup updated with Roles: ${cleanRoles}`,
       userId,
       userName,
       userAvatar,
-      "/setup",
+      '/setup',
       null,
       null
-    );
+    )
 
     const setupEmbed = new EmbedBuilder()
-      .setTitle("✅ Setup Complete!")
+      .setTitle('✅ Setup Complete!')
       .addFields(
-        { name: "Forum Channel", value: `<#${forum.id}>`, inline: true },
+        { name: 'Forum Channel', value: `<#${forum.id}>`, inline: true },
         {
-          name: "Helper Roles",
+          name: 'Helper Roles',
           value: cleanRoles
-            .split(",")
-            .map((id) => `<@&${id}>`)
-            .join(" "),
-          inline: true,
-        },
-        { name: "Tags Configured", value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\`${unansTag ? `\nUnanswered: \`${unansTag}\`` : ''}`, inline: false },
-        { name: "Audit Channel", value: auditChannel ? `<#${auditChannel.id}>` : 'Not configured', inline: true }
-      )
-      .setColor(IMPULSE_COLOR)
-      .setTimestamp()
-      .setFooter({ text: "Impulse Bot" });
-
-    return interaction.reply({ embeds: [setupEmbed], ephemeral: true });
-  }
-
-  if (interaction.commandName === "info") {
-    if (!settings) {
-      return interaction.reply({
-        content:
-          "❌ This server hasn't been configured yet. Use `/setup` first.",
-        ephemeral: true,
-      });
-    }
-
-    const timerCount = db
-      .prepare("SELECT COUNT(*) as count FROM pending_locks WHERE guild_id = ?")
-      .get(interaction.guildId).count;
-
-    const infoEmbed = new EmbedBuilder()
-      .setTitle("Bot Configuration Status")
-      .addFields(
-        {
-          name: "Forum Channel",
-          value: `<#${settings.forum_id}>`,
-          inline: true,
+            .split(',')
+            .map(id => `<@&${id}>`)
+            .join(' '),
+          inline: true
         },
         {
-          name: "Helper Roles",
-          value: settings.helper_role_id
-            .split(",")
-            .map((id) => `<@&${id}>`)
-            .join(", "),
-          inline: true,
-        },
-        { name: "Active Timers", value: timerCount.toString(), inline: true },
-        {
-          name: "Resolved Tag",
-          value: `\`${settings.resolved_tag}\``,
-          inline: true,
+          name: 'Tags Configured',
+          value: `Resolved: \`${resTag}\`\nDuplicate: \`${dupTag}\`${
+            unansTag ? `\nUnanswered: \`${unansTag}\`` : ''
+          }`,
+          inline: false
         },
         {
-          name: "Duplicate Tag",
-          value: `\`${settings.duplicate_tag}\``,
-          inline: true,
+          name: 'Audit Channel',
+          value: auditChannel ? `<#${auditChannel.id}>` : 'Not configured',
+          inline: true
         }
       )
       .setColor(IMPULSE_COLOR)
       .setTimestamp()
-      .setFooter({ text: "Impulse Bot" });
+      .setFooter({ text: 'Impulse Bot' })
 
-    return interaction.reply({ embeds: [infoEmbed] });
+    return interaction.reply({ embeds: [setupEmbed], ephemeral: true })
+  }
+
+  if (interaction.commandName === 'info') {
+    if (!settings) {
+      return interaction.reply({
+        content:
+          "❌ This server hasn't been configured yet. Use `/setup` first.",
+        ephemeral: true
+      })
+    }
+
+    const timerCount = db
+      .prepare('SELECT COUNT(*) as count FROM pending_locks WHERE guild_id = ?')
+      .get(interaction.guildId).count
+
+    const infoEmbed = new EmbedBuilder()
+      .setTitle('Bot Configuration Status')
+      .addFields(
+        {
+          name: 'Forum Channel',
+          value: `<#${settings.forum_id}>`,
+          inline: true
+        },
+        {
+          name: 'Helper Roles',
+          value: settings.helper_role_id
+            .split(',')
+            .map(id => `<@&${id}>`)
+            .join(', '),
+          inline: true
+        },
+        { name: 'Active Timers', value: timerCount.toString(), inline: true },
+        {
+          name: 'Resolved Tag',
+          value: `\`${settings.resolved_tag}\``,
+          inline: true
+        },
+        {
+          name: 'Duplicate Tag',
+          value: `\`${settings.duplicate_tag}\``,
+          inline: true
+        }
+      )
+      .setColor(IMPULSE_COLOR)
+      .setTimestamp()
+      .setFooter({ text: 'Impulse Bot' })
+
+    return interaction.reply({ embeds: [infoEmbed] })
   }
 
   if (!settings) {
     return interaction.reply({
-      content: "❌ Please run `/setup` first.",
-      ephemeral: true,
-    });
+      content: '❌ Please run `/setup` first.',
+      ephemeral: true
+    })
   }
 
-  if (interaction.commandName === "resolved") {
-
-    const isOwner = interaction.user.id === interaction.channel.ownerId;
-    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-    const isHelper = hasHelperRole(interaction.member, settings);
+  if (interaction.commandName === 'resolved') {
+    const isOwner = interaction.user.id === interaction.channel.ownerId
+    const isAdmin = interaction.member.permissions.has(
+      PermissionFlagsBits.Administrator
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
 
     if (!isOwner && !isAdmin && !isHelper) {
       return interaction.reply({
-        content: "❌ **Access Denied:** Only the thread creator or staff/helpers can mark this as resolved.",
-        ephemeral: true,
-      });
+        content:
+          '❌ **Access Denied:** Only the thread creator or staff/helpers can mark this as resolved.',
+        ephemeral: true
+      })
     }
 
-    const lockTime = Date.now() + 30 * 60 * 1000; // Hardcoded 30 mins
+    const lockTime = Date.now() + 30 * 60 * 1000 // Hardcoded 30 mins
 
     db.prepare(
-      "INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)"
-    ).run(interaction.channelId, interaction.guildId, lockTime);
+      'INSERT OR REPLACE INTO pending_locks (thread_id, guild_id, lock_at) VALUES (?, ?, ?)'
+    ).run(interaction.channelId, interaction.guildId, lockTime)
 
     const resolvedEmbed = new EmbedBuilder()
-      .setTitle("✅ Thread Marked as Resolved")
+      .setTitle('✅ Thread Marked as Resolved')
       .setDescription(
-        `This thread will automatically lock <t:${Math.floor(lockTime / 1000)}:R> at <t:${Math.floor(lockTime / 1000)}:t>.`
+        `This thread will automatically lock <t:${Math.floor(
+          lockTime / 1000
+        )}:R> at <t:${Math.floor(lockTime / 1000)}:t>.`
       )
       .setColor(0x10b981)
       .setTimestamp()
-      .setFooter({ text: "Impulse Bot • Auto-lock scheduled" });
+      .setFooter({ text: 'Impulse Bot • Auto-lock scheduled' })
 
     const reply = await interaction.reply({
       embeds: [resolvedEmbed],
-      fetchReply: true,
-    });
+      fetchReply: true
+    })
 
     logAction(
       interaction.guildId,
-      "RESOLVED",
+      'RESOLVED',
       `Marked thread for locking (30m): ${interaction.channel.name}`,
       userId,
       userName,
       userAvatar,
-      "/resolved",
+      '/resolved',
       interaction.channelId,
       reply.id
-    );
+    )
 
-    await logToDiscord(interaction.guildId, "RESOLVED", `Thread marked resolved by <@${userId}>: **${interaction.channel.name}**`, userId);
-
+    await logToDiscord(
+      interaction.guildId,
+      'RESOLVED',
+      `Thread marked resolved by <@${userId}>: **${interaction.channel.name}**`,
+      userId
+    )
   }
 
-  if (interaction.commandName === "cancel") {
-    const settings = getSettings(interaction.guildId);
+  if (interaction.commandName === 'cancel') {
+    const settings = getSettings(interaction.guildId)
     if (!settings)
       return interaction.reply({
-        content: "❌ Not configured.",
-        ephemeral: true,
-      });
+        content: '❌ Not configured.',
+        ephemeral: true
+      })
 
-    const isOwner = interaction.user.id === interaction.channel.ownerId;
-    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-    const isHelper = hasHelperRole(interaction.member, settings);
+    const isOwner = interaction.user.id === interaction.channel.ownerId
+    const isAdmin = interaction.member.permissions.has(
+      PermissionFlagsBits.Administrator
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
 
     if (!isOwner && !isAdmin && !isHelper) {
       return interaction.reply({
-        content: "❌ **Access Denied:** Only the thread creator or staff/helpers can cancel timers.",
-        ephemeral: true,
-      });
+        content:
+          '❌ **Access Denied:** Only the thread creator or staff/helpers can cancel timers.',
+        ephemeral: true
+      })
     }
 
     const existing = db
-      .prepare("SELECT * FROM pending_locks WHERE thread_id = ?")
-      .get(interaction.channelId);
+      .prepare('SELECT * FROM pending_locks WHERE thread_id = ?')
+      .get(interaction.channelId)
 
     if (existing) {
-      db.prepare("DELETE FROM pending_locks WHERE thread_id = ?").run(
+      db.prepare('DELETE FROM pending_locks WHERE thread_id = ?').run(
         interaction.channelId
-      );
+      )
 
       const reply = await interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setTitle("🔓 Lock Timer Cancelled")
-            .setDescription(`The automatic lock has been cancelled. Thread renewed <t:${Math.floor(Date.now() / 1000)}:R>.`)
-            .setColor(0xf59e0b),
+            .setTitle('🔓 Lock Timer Cancelled')
+            .setDescription(
+              `The automatic lock has been cancelled. Thread renewed <t:${Math.floor(
+                Date.now() / 1000
+              )}:R>.`
+            )
+            .setColor(0xf59e0b)
         ],
-        fetchReply: true,
-      });
+        fetchReply: true
+      })
 
       logAction(
         interaction.guildId,
-        "CANCEL",
+        'CANCEL',
         `Cancelled lock timer: ${interaction.channel.name}`,
         userId,
         userName,
         userAvatar,
-        "/cancel",
+        '/cancel',
         interaction.channelId,
         reply.id
-      );
-      return; // Exit after handling
+      )
+      return // Exit after handling
     }
 
     const tracked = db
-      .prepare("SELECT * FROM thread_tracking WHERE thread_id = ?")
-      .get(interaction.channelId);
+      .prepare('SELECT * FROM thread_tracking WHERE thread_id = ?')
+      .get(interaction.channelId)
 
     if (tracked && tracked.stale_warning_sent === 1) {
       db.prepare(
-        "UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?"
-      ).run(Date.now(), interaction.channelId);
+        'UPDATE thread_tracking SET stale_warning_sent = 0, last_renewed_at = ? WHERE thread_id = ?'
+      ).run(Date.now(), interaction.channelId)
 
       const reply = await interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setTitle("♻️ Thread Renewed")
-            .setDescription(`The inactivity timer has been reset as of <t:${Math.floor(Date.now() / 1000)}:F>. No further warnings will be sent for 30 days.`)
-            .setColor(0x10b981),
+            .setTitle('♻️ Thread Renewed')
+            .setDescription(
+              `The inactivity timer has been reset as of <t:${Math.floor(
+                Date.now() / 1000
+              )}:F>. No further warnings will be sent for 30 days.`
+            )
+            .setColor(0x10b981)
         ],
-        fetchReply: true,
-      });
+        fetchReply: true
+      })
 
       logAction(
         interaction.guildId,
-        "THREAD_RENEWED",
+        'THREAD_RENEWED',
         `Thread renewed: ${interaction.channel.name}`,
         userId,
         userName,
         userAvatar,
-        "/cancel",
+        '/cancel',
         interaction.channelId,
         reply.id
-      );
+      )
     } else {
       return interaction.reply({
         content:
-          "❌ There is no pending lock timer or stale warning for this thread.",
-        ephemeral: true,
-      });
+          '❌ There is no pending lock timer or stale warning for this thread.',
+        ephemeral: true
+      })
     }
   }
 
-  if (interaction.commandName === "duplicate") {
+  if (interaction.commandName === 'duplicate') {
     const isAdmin = interaction.member.permissions.has(
       PermissionFlagsBits.Administrator
-    );
-    const isHelper = hasHelperRole(interaction.member, settings);
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
 
     if (!isAdmin && !isHelper) {
       return interaction.reply({
-        content: "❌ **Access Denied**",
-        ephemeral: true,
-      });
+        content: '❌ **Access Denied**',
+        ephemeral: true
+      })
     }
 
-    const link = interaction.options.getString("link");
+    const link = interaction.options.getString('link')
 
     try {
-      const currentTags = interaction.channel.appliedTags || [];
+      const currentTags = interaction.channel.appliedTags || []
       const newTags = [
-        ...currentTags.filter((t) => t !== settings.unanswered_tag),
-        settings.duplicate_tag,
-      ];
-      await interaction.channel.setAppliedTags(newTags);
+        ...currentTags.filter(t => t !== settings.unanswered_tag),
+        settings.duplicate_tag
+      ]
+      await interaction.channel.setAppliedTags(newTags)
 
       const duplicateEmbed = new EmbedBuilder()
-        .setTitle("🔄 Thread Closed: Duplicate")
+        .setTitle('🔄 Thread Closed: Duplicate')
         .setDescription(`Original Thread: ${link}`)
-        .setColor(0x0ea5e9);
+        .setColor(0x0ea5e9)
 
       const reply = await interaction.reply({
         embeds: [duplicateEmbed],
-        fetchReply: true,
-      });
-      await interaction.channel.setLocked(true);
+        fetchReply: true
+      })
+      await interaction.channel.setLocked(true)
 
       logAction(
         interaction.guildId,
-        "DUPLICATE",
+        'DUPLICATE',
         `Closed duplicate: ${interaction.channel.name}`,
         userId,
         userName,
@@ -4778,35 +5839,35 @@ client.on("interactionCreate", async (interaction) => {
         `/duplicate link:${link}`,
         interaction.channelId,
         reply.id
-      );
+      )
     } catch (e) {
-      console.error(e);
+      console.error(e)
       if (!interaction.replied)
         await interaction.reply({
-          content: "⚠️ Permission error.",
-          ephemeral: true,
-        });
+          content: '⚠️ Permission error.',
+          ephemeral: true
+        })
     }
   }
 
-  if (interaction.commandName === "snippet") {
-    const userId = interaction.user.id;
-    const userName = interaction.user.username;
-    const userAvatar = `https://cdn.discordapp.com/avatars/${userId}/${interaction.user.avatar}.png`;
+  if (interaction.commandName === 'snippet') {
+    const userId = interaction.user.id
+    const userName = interaction.user.username
+    const userAvatar = `https://cdn.discordapp.com/avatars/${userId}/${interaction.user.avatar}.png`
 
-    const name = interaction.options.getString("name");
+    const name = interaction.options.getString('name')
     const snippet = db
       .prepare(
         `SELECT * FROM snippets WHERE guild_id = ? AND name = ? AND enabled = 1`
       )
-      .get(interaction.guildId, name.toLowerCase());
+      .get(interaction.guildId, name.toLowerCase())
 
     if (!snippet) {
       return interaction.reply({
         content:
           "❌ We couldn't find the snippet you're looking for. It may have been deleted.",
-        ephemeral: true,
-      });
+        ephemeral: true
+      })
     }
 
     try {
@@ -4814,27 +5875,27 @@ client.on("interactionCreate", async (interaction) => {
         .setTitle(parseVars(snippet.title, interaction))
         .setURL(snippet.url || null)
         .setDescription(parseVars(snippet.description, interaction))
-        .setColor(snippet.color || "#FFAA00")
-        .setTimestamp();
+        .setColor(snippet.color || '#FFAA00')
+        .setTimestamp()
 
-      if (snippet.image_url && snippet.image_url.startsWith("http"))
-        embed.setImage(snippet.image_url);
-      if (snippet.thumbnail_url && snippet.thumbnail_url.startsWith("http"))
-        embed.setThumbnail(snippet.thumbnail_url);
+      if (snippet.image_url && snippet.image_url.startsWith('http'))
+        embed.setImage(snippet.image_url)
+      if (snippet.thumbnail_url && snippet.thumbnail_url.startsWith('http'))
+        embed.setThumbnail(snippet.thumbnail_url)
       if (snippet.footer)
-        embed.setFooter({ text: parseVars(snippet.footer, interaction) });
+        embed.setFooter({ text: parseVars(snippet.footer, interaction) })
 
       // Parse Fields
       try {
-        const fields = JSON.parse(snippet.fields || "[]");
+        const fields = JSON.parse(snippet.fields || '[]')
         if (fields.length > 0) {
           embed.addFields(
-            fields.map((f) => ({
+            fields.map(f => ({
               name: parseVars(f.name, interaction),
               value: parseVars(f.value, interaction),
-              inline: f.inline,
+              inline: f.inline
             }))
-          );
+          )
         }
       } catch (e) {
         /* silent fail on fields */
@@ -4842,7 +5903,7 @@ client.on("interactionCreate", async (interaction) => {
 
       logAction(
         interaction.guildId,
-        "SNIPPET",
+        'SNIPPET',
         `Used snippet: ${name}`,
         userId,
         userName,
@@ -4850,55 +5911,55 @@ client.on("interactionCreate", async (interaction) => {
         `/snippet name:${name}`,
         interaction.channelId,
         null
-      );
+      )
 
-      return interaction.reply({ embeds: [embed] });
+      return interaction.reply({ embeds: [embed] })
     } catch (error) {
-      console.error("Snippet Command Error:", error);
+      console.error('Snippet Command Error:', error)
       return interaction.reply({
-        content: "❌ There was an error rendering this snippet.",
-        ephemeral: true,
-      });
+        content: '❌ There was an error rendering this snippet.',
+        ephemeral: true
+      })
     }
   }
 
-  if (interaction.commandName === "link") {
+  if (interaction.commandName === 'link') {
     if (!interaction.channel.isThread()) {
       return interaction.reply({
-        content: "❌ This command can only be used in threads.",
-        ephemeral: true,
-      });
+        content: '❌ This command can only be used in threads.',
+        ephemeral: true
+      })
     }
 
     if (interaction.user.id !== interaction.channel.ownerId) {
       return interaction.reply({
-        content: "❌ Only the thread owner can add links to their thread.",
-        ephemeral: true,
-      });
+        content: '❌ Only the thread owner can add links to their thread.',
+        ephemeral: true
+      })
     }
 
-    const url = interaction.options.getString("url");
+    const url = interaction.options.getString('url')
 
     try {
-      new URL(url);
+      new URL(url)
     } catch (e) {
       return interaction.reply({
         content:
-          "❌ Invalid URL format. Please provide a valid URL (e.g., https://example.com)",
-        ephemeral: true,
-      });
+          '❌ Invalid URL format. Please provide a valid URL (e.g., https://example.com)',
+        ephemeral: true
+      })
     }
 
     const existing = db
-      .prepare("SELECT * FROM thread_links WHERE thread_id = ?")
-      .get(interaction.channelId);
+      .prepare('SELECT * FROM thread_links WHERE thread_id = ?')
+      .get(interaction.channelId)
 
     if (existing) {
       return interaction.reply({
         content:
-          "❌ This thread already has a link attached. Use `/removelink` to remove it first.",
-        ephemeral: true,
-      });
+          '❌ This thread already has a link attached. Use `/removelink` to remove it first.',
+        ephemeral: true
+      })
     }
 
     // Save to database
@@ -4910,11 +5971,11 @@ client.on("interactionCreate", async (interaction) => {
       url,
       interaction.user.id,
       Date.now()
-    );
+    )
 
     // Send embed message
     const linkEmbed = new EmbedBuilder()
-      .setTitle("🔗 Link Attached to Thread")
+      .setTitle('🔗 Link Attached to Thread')
       .setDescription(
         `A link has been attached to this thread by <@${interaction.user.id}>.\n\n` +
           `**React with 🔗 on the thread's starter message to receive the link via DM.**\n\n` +
@@ -4924,27 +5985,27 @@ client.on("interactionCreate", async (interaction) => {
       )
       .setColor(0x3b82f6)
       .setTimestamp()
-      .setFooter({ text: "Impulse Bot • Link System" });
+      .setFooter({ text: 'Impulse Bot • Link System' })
 
-    await interaction.reply({ embeds: [linkEmbed] });
+    await interaction.reply({ embeds: [linkEmbed] })
 
     try {
-      const starterMessage = await interaction.channel.fetchStarterMessage();
+      const starterMessage = await interaction.channel.fetchStarterMessage()
       if (starterMessage) {
-        await starterMessage.react("🔗");
+        await starterMessage.react('🔗')
       }
     } catch (error) {
-      console.error("Error reacting to starter message:", error);
+      console.error('Error reacting to starter message:', error)
       await interaction.followUp({
         content:
-          "⚠️ Link added but could not add reaction to thread starter message.",
-        ephemeral: true,
-      });
+          '⚠️ Link added but could not add reaction to thread starter message.',
+        ephemeral: true
+      })
     }
 
     logAction(
       interaction.guildId,
-      "LINK_ADDED",
+      'LINK_ADDED',
       `Link added to thread: ${interaction.channel.name}`,
       interaction.user.id,
       interaction.user.username,
@@ -4952,54 +6013,54 @@ client.on("interactionCreate", async (interaction) => {
       `/link url:${url}`,
       interaction.channelId,
       null
-    );
+    )
   }
 
-  if (interaction.commandName === "removelink") {
-    const settings = getSettings(interaction.guildId);
+  if (interaction.commandName === 'removelink') {
+    const settings = getSettings(interaction.guildId)
     if (!settings)
       return interaction.reply({
-        content: "❌ Not configured.",
-        ephemeral: true,
-      });
+        content: '❌ Not configured.',
+        ephemeral: true
+      })
     if (!interaction.channel.isThread())
       return interaction.reply({
-        content: "❌ Threads only.",
-        ephemeral: true,
-      });
+        content: '❌ Threads only.',
+        ephemeral: true
+      })
 
-    const isOwner = interaction.user.id === interaction.channel.ownerId;
+    const isOwner = interaction.user.id === interaction.channel.ownerId
     const isAdmin = interaction.member.permissions.has(
       PermissionFlagsBits.Administrator
-    );
-    const isHelper = hasHelperRole(interaction.member, settings);
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
 
     if (!isOwner && !isAdmin && !isHelper) {
       return interaction.reply({
         content:
           "❌ You don't have permission. Only the thread owner or staff can remove links.",
-        ephemeral: true,
-      });
+        ephemeral: true
+      })
     }
 
     const link = db
-      .prepare("SELECT * FROM thread_links WHERE thread_id = ?")
-      .get(interaction.channelId);
+      .prepare('SELECT * FROM thread_links WHERE thread_id = ?')
+      .get(interaction.channelId)
     if (!link)
       return interaction.reply({
-        content: "❌ No link attached to this thread.",
-        ephemeral: true,
-      });
+        content: '❌ No link attached to this thread.',
+        ephemeral: true
+      })
 
-    db.prepare("DELETE FROM thread_links WHERE thread_id = ?").run(
+    db.prepare('DELETE FROM thread_links WHERE thread_id = ?').run(
       interaction.channelId
-    );
+    )
 
     // Remove the system reaction from the starter message
     try {
-      const starterMessage = await interaction.channel.fetchStarterMessage();
-      const reaction = starterMessage.reactions.cache.get("🔗");
-      if (reaction) await reaction.remove();
+      const starterMessage = await interaction.channel.fetchStarterMessage()
+      const reaction = starterMessage.reactions.cache.get('🔗')
+      if (reaction) await reaction.remove()
     } catch (e) {
       /* ignore cleanup errors */
     }
@@ -5007,333 +6068,583 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setTitle("🔗 Link Removed")
+          .setTitle('🔗 Link Removed')
           .setDescription(
             `The link has been removed by ${
-              isOwner ? "the thread owner" : "staff"
+              isOwner ? 'the thread owner' : 'staff'
             }.`
           )
-          .setColor(0xef4444),
-      ],
-    });
+          .setColor(0xef4444)
+      ]
+    })
   }
 
   if (interaction.commandName === 'reactmessage') {
-      const targetUser = interaction.options.getUser('user');
-      const count = interaction.options.getInteger('count');
-      const reaction = interaction.options.getString('reaction');
-      const text = interaction.options.getString('message');
+    const targetUser = interaction.options.getUser('user')
+    const count = interaction.options.getInteger('count')
+    const reaction = interaction.options.getString('reaction')
+    const text = interaction.options.getString('message')
 
-      db.prepare(`INSERT INTO reaction_triggers (guild_id, target_user_id, reaction_id, trigger_count, response_text) VALUES (?, ?, ?, ?, ?)`).run(
-          interaction.guildId, targetUser.id, reaction, count, text
-      );
+    db.prepare(
+      `INSERT INTO reaction_triggers (guild_id, target_user_id, reaction_id, trigger_count, response_text) VALUES (?, ?, ?, ?, ?)`
+    ).run(interaction.guildId, targetUser.id, reaction, count, text)
 
-      logAction(
-        interaction.guildId,
-        "TRIGGER_CREATE",
-        `Reaction trigger set for ${targetUser.username}: ${count}x ${reaction} → "${text}"`,
-        interaction.user.id,
-        interaction.user.username,
-        interaction.user.displayAvatarURL(),
-        `/reactmessage`,
-        null,
-        null
-    );
-    return interaction.reply({ content: `✅ Trigger set! When **${targetUser.username}**'s message gets ${count}x ${reaction}, I'll reply: "${text}"`, ephemeral: true });
+    logAction(
+      interaction.guildId,
+      'TRIGGER_CREATE',
+      `Reaction trigger set for ${targetUser.username}: ${count}x ${reaction} → "${text}"`,
+      interaction.user.id,
+      interaction.user.username,
+      interaction.user.displayAvatarURL(),
+      `/reactmessage`,
+      null,
+      null
+    )
+    return interaction.reply({
+      content: `✅ Trigger set! When **${targetUser.username}**'s message gets ${count}x ${reaction}, I'll reply: "${text}"`,
+      ephemeral: true
+    })
   }
 
   if (interaction.commandName === 'blockuser') {
-    const target = interaction.options.getUser('user');
-    const reason = interaction.options.getString('reason') || null;
-    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-    const isHelper = hasHelperRole(interaction.member, settings);
-    if (!isAdmin && !isHelper) return interaction.reply({ content: '❌ Access Denied.', ephemeral: true });
+    const target = interaction.options.getUser('user')
+    const reason = interaction.options.getString('reason') || null
+    const isAdmin = interaction.member.permissions.has(
+      PermissionFlagsBits.Administrator
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
+    if (!isAdmin && !isHelper)
+      return interaction.reply({
+        content: '❌ Access Denied.',
+        ephemeral: true
+      })
 
-    db.prepare("INSERT OR REPLACE INTO blocked_users (guild_id, user_id, reason, blocked_by, blocked_at) VALUES (?, ?, ?, ?, ?)").run(
-        interaction.guildId, target.id, reason, userId, Date.now()
-    );
-    logAction(interaction.guildId, "USER_BLOCKED", `${target.username} blocked${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/blockuser`, null, null);
-    await logToDiscord(interaction.guildId, "USER_BLOCKED", `**${target.username}** blocked by <@${userId}>${reason ? `\nReason: ${reason}` : ''}`, userId);
-    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🚫 User Blocked').setDescription(`**${target.username}** has been blocked from using bot commands in this server.${reason ? `\n**Reason:** ${reason}` : ''}`).setColor(0xef4444).setTimestamp()], ephemeral: true });
+    db.prepare(
+      'INSERT OR REPLACE INTO blocked_users (guild_id, user_id, reason, blocked_by, blocked_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(interaction.guildId, target.id, reason, userId, Date.now())
+    logAction(
+      interaction.guildId,
+      'USER_BLOCKED',
+      `${target.username} blocked${reason ? `: ${reason}` : ''}`,
+      userId,
+      userName,
+      userAvatar,
+      `/blockuser`,
+      null,
+      null
+    )
+    await logToDiscord(
+      interaction.guildId,
+      'USER_BLOCKED',
+      `**${target.username}** blocked by <@${userId}>${
+        reason ? `\nReason: ${reason}` : ''
+      }`,
+      userId
+    )
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('🚫 User Blocked')
+          .setDescription(
+            `**${
+              target.username
+            }** has been blocked from using bot commands in this server.${
+              reason ? `\n**Reason:** ${reason}` : ''
+            }`
+          )
+          .setColor(0xef4444)
+          .setTimestamp()
+      ],
+      ephemeral: true
+    })
   }
 
   if (interaction.commandName === 'unblockuser') {
-    const target = interaction.options.getUser('user');
-    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-    const isHelper = hasHelperRole(interaction.member, settings);
-    if (!isAdmin && !isHelper) return interaction.reply({ content: '❌ Access Denied.', ephemeral: true });
+    const target = interaction.options.getUser('user')
+    const isAdmin = interaction.member.permissions.has(
+      PermissionFlagsBits.Administrator
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
+    if (!isAdmin && !isHelper)
+      return interaction.reply({
+        content: '❌ Access Denied.',
+        ephemeral: true
+      })
 
-    db.prepare("DELETE FROM blocked_users WHERE guild_id = ? AND user_id = ?").run(interaction.guildId, target.id);
-    db.prepare("DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?").run(interaction.guildId, target.id);
-    logAction(interaction.guildId, "USER_UNBLOCKED", `${target.username} unblocked`, userId, userName, userAvatar, `/unblockuser`, null, null);
-    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('✅ User Unblocked').setDescription(`**${target.username}** can now use bot commands again.`).setColor(0x10b981).setTimestamp()], ephemeral: true });
+    db.prepare(
+      'DELETE FROM blocked_users WHERE guild_id = ? AND user_id = ?'
+    ).run(interaction.guildId, target.id)
+    db.prepare(
+      'DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?'
+    ).run(interaction.guildId, target.id)
+    logAction(
+      interaction.guildId,
+      'USER_UNBLOCKED',
+      `${target.username} unblocked`,
+      userId,
+      userName,
+      userAvatar,
+      `/unblockuser`,
+      null,
+      null
+    )
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('✅ User Unblocked')
+          .setDescription(
+            `**${target.username}** can now use bot commands again.`
+          )
+          .setColor(0x10b981)
+          .setTimestamp()
+      ],
+      ephemeral: true
+    })
   }
 
   if (interaction.commandName === 'globalban') {
     if (userId !== process.env.ADMIN_DISCORD_ID) {
-        return interaction.reply({ content: '❌ This command is restricted to the bot owner.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ This command is restricted to the bot owner.',
+        ephemeral: true
+      })
     }
-    const target = interaction.options.getUser('user');
-    const reason = interaction.options.getString('reason') || null;
+    const target = interaction.options.getUser('user')
+    const reason = interaction.options.getString('reason') || null
 
     if (target.id === process.env.ADMIN_DISCORD_ID) {
-        return interaction.reply({ content: '❌ Cannot blacklist yourself.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ Cannot blacklist yourself.',
+        ephemeral: true
+      })
     }
 
-    db.prepare("INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)").run(
-        target.id, reason, userId, Date.now()
-    );
-    logAction(interaction.guildId, "USER_BANNED", `${target.username} globally blacklisted${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/globalban`, null, null);
-    await logToDiscord(interaction.guildId, "USER_BANNED", `**${target.username}** (\`${target.id}\`) globally blacklisted by <@${userId}>${reason ? `\nReason: ${reason}` : ''}`, userId);
+    db.prepare(
+      'INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)'
+    ).run(target.id, reason, userId, Date.now())
+    logAction(
+      interaction.guildId,
+      'USER_BANNED',
+      `${target.username} globally blacklisted${reason ? `: ${reason}` : ''}`,
+      userId,
+      userName,
+      userAvatar,
+      `/globalban`,
+      null,
+      null
+    )
+    await logToDiscord(
+      interaction.guildId,
+      'USER_BANNED',
+      `**${target.username}** (\`${
+        target.id
+      }\`) globally blacklisted by <@${userId}>${
+        reason ? `\nReason: ${reason}` : ''
+      }`,
+      userId
+    )
     return interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setTitle('🔨 User Globally Blacklisted')
-            .setDescription(`**${target.username}** (\`${target.id}\`) is now blacklisted from Impulse across all servers.${reason ? `\n**Reason:** ${reason}` : ''}`)
-            .setColor(0x7f1d1d)
-            .setTimestamp()
-            .setFooter({ text: 'Impulse Bot • Global Blacklist' })],
-        ephemeral: true
-    });
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('🔨 User Globally Blacklisted')
+          .setDescription(
+            `**${target.username}** (\`${
+              target.id
+            }\`) is now blacklisted from Impulse across all servers.${
+              reason ? `\n**Reason:** ${reason}` : ''
+            }`
+          )
+          .setColor(0x7f1d1d)
+          .setTimestamp()
+          .setFooter({ text: 'Impulse Bot • Global Blacklist' })
+      ],
+      ephemeral: true
+    })
   }
 
   if (interaction.commandName === 'globalunban') {
     if (userId !== process.env.ADMIN_DISCORD_ID) {
-        return interaction.reply({ content: '❌ This command is restricted to the bot owner.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ This command is restricted to the bot owner.',
+        ephemeral: true
+      })
     }
-    const target = interaction.options.getUser('user');
-    const existing = db.prepare("SELECT 1 FROM banned_users WHERE user_id = ?").get(target.id);
+    const target = interaction.options.getUser('user')
+    const existing = db
+      .prepare('SELECT 1 FROM banned_users WHERE user_id = ?')
+      .get(target.id)
     if (!existing) {
-        return interaction.reply({ content: `❌ **${target.username}** is not globally blacklisted.`, ephemeral: true });
+      return interaction.reply({
+        content: `❌ **${target.username}** is not globally blacklisted.`,
+        ephemeral: true
+      })
     }
 
-    db.prepare("DELETE FROM banned_users WHERE user_id = ?").run(target.id);
-    logAction(interaction.guildId, "USER_UNBANNED", `${target.username} removed from global blacklist`, userId, userName, userAvatar, `/globalunban`, null, null);
+    db.prepare('DELETE FROM banned_users WHERE user_id = ?').run(target.id)
+    logAction(
+      interaction.guildId,
+      'USER_UNBANNED',
+      `${target.username} removed from global blacklist`,
+      userId,
+      userName,
+      userAvatar,
+      `/globalunban`,
+      null,
+      null
+    )
     return interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setTitle('✅ Global Blacklist Removed')
-            .setDescription(`**${target.username}** can now use Impulse Bot again.`)
-            .setColor(0x10b981)
-            .setTimestamp()],
-        ephemeral: true
-    });
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('✅ Global Blacklist Removed')
+          .setDescription(
+            `**${target.username}** can now use Impulse Bot again.`
+          )
+          .setColor(0x10b981)
+          .setTimestamp()
+      ],
+      ephemeral: true
+    })
   }
 
   if (interaction.commandName === 'suspend') {
-    const isGuildAdmin = interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
-    const isHelper = hasHelperRole(interaction.member, settings);
+    const isGuildAdmin = interaction.member.permissions.has(
+      PermissionFlagsBits.ManageGuild
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
     if (!isGuildAdmin && !isHelper) {
-        return interaction.reply({ content: '❌ Manage Server permission required.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ Manage Server permission required.',
+        ephemeral: true
+      })
     }
 
-    const target = interaction.options.getUser('user');
-    const durationStr = interaction.options.getString('duration');
-    const reason = interaction.options.getString('reason') || null;
+    const target = interaction.options.getUser('user')
+    const durationStr = interaction.options.getString('duration')
+    const reason = interaction.options.getString('reason') || null
 
     if (target.id === userId) {
-        return interaction.reply({ content: '❌ You cannot suspend yourself.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ You cannot suspend yourself.',
+        ephemeral: true
+      })
     }
     if (target.id === process.env.ADMIN_DISCORD_ID) {
-        return interaction.reply({ content: '❌ Cannot suspend the bot owner.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ Cannot suspend the bot owner.',
+        ephemeral: true
+      })
     }
 
-    const expiresAt = parseDuration(durationStr);
+    const expiresAt = parseDuration(durationStr)
     if (expiresAt === undefined) {
-        return interaction.reply({
-            content: '❌ Invalid duration format. Use `30m`, `2h`, `7d`, `1w`, or `permanent`.',
-            ephemeral: true
-        });
+      return interaction.reply({
+        content:
+          '❌ Invalid duration format. Use `30m`, `2h`, `7d`, `1w`, or `permanent`.',
+        ephemeral: true
+      })
     }
 
-    db.prepare("INSERT OR REPLACE INTO suspended_users (guild_id, user_id, reason, suspended_at, expires_at) VALUES (?, ?, ?, ?, ?)").run(
-        interaction.guildId, target.id, reason, Date.now(), expiresAt
-    );
+    db.prepare(
+      'INSERT OR REPLACE INTO suspended_users (guild_id, user_id, reason, suspended_at, expires_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(interaction.guildId, target.id, reason, Date.now(), expiresAt)
 
     const durationDisplay = expiresAt
-        ? `until <t:${Math.floor(expiresAt / 1000)}:F> (<t:${Math.floor(expiresAt / 1000)}:R>)`
-        : '**permanently**';
+      ? `until <t:${Math.floor(expiresAt / 1000)}:F> (<t:${Math.floor(
+          expiresAt / 1000
+        )}:R>)`
+      : '**permanently**'
 
-    logAction(interaction.guildId, "AUTO_SUSPEND", `${target.username} manually suspended${reason ? `: ${reason}` : ''}`, userId, userName, userAvatar, `/suspend`, null, null);
-    await logToDiscord(interaction.guildId, "AUTO_SUSPEND", `**${target.username}** suspended by <@${userId}> ${durationDisplay}${reason ? `\nReason: ${reason}` : ''}`, userId);
+    logAction(
+      interaction.guildId,
+      'AUTO_SUSPEND',
+      `${target.username} manually suspended${reason ? `: ${reason}` : ''}`,
+      userId,
+      userName,
+      userAvatar,
+      `/suspend`,
+      null,
+      null
+    )
+    await logToDiscord(
+      interaction.guildId,
+      'AUTO_SUSPEND',
+      `**${target.username}** suspended by <@${userId}> ${durationDisplay}${
+        reason ? `\nReason: ${reason}` : ''
+      }`,
+      userId
+    )
 
     return interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setTitle('⏸ User Suspended')
-            .setDescription(`**${target.username}** has been suspended from using bot commands ${durationDisplay}.${reason ? `\n**Reason:** ${reason}` : ''}`)
-            .setColor(0xf97316)
-            .setTimestamp()
-            .setFooter({ text: 'Impulse Bot • Server Suspension' })],
-        ephemeral: true
-    });
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('⏸ User Suspended')
+          .setDescription(
+            `**${
+              target.username
+            }** has been suspended from using bot commands ${durationDisplay}.${
+              reason ? `\n**Reason:** ${reason}` : ''
+            }`
+          )
+          .setColor(0xf97316)
+          .setTimestamp()
+          .setFooter({ text: 'Impulse Bot • Server Suspension' })
+      ],
+      ephemeral: true
+    })
   }
 
   if (interaction.commandName === 'unsuspend') {
-    const isGuildAdmin = interaction.member.permissions.has(PermissionFlagsBits.ManageGuild);
-    const isHelper = hasHelperRole(interaction.member, settings);
+    const isGuildAdmin = interaction.member.permissions.has(
+      PermissionFlagsBits.ManageGuild
+    )
+    const isHelper = hasHelperRole(interaction.member, settings)
     if (!isGuildAdmin && !isHelper) {
-        return interaction.reply({ content: '❌ Manage Server permission required.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ Manage Server permission required.',
+        ephemeral: true
+      })
     }
 
-    const target = interaction.options.getUser('user');
-    const existing = db.prepare("SELECT 1 FROM suspended_users WHERE guild_id = ? AND user_id = ?").get(interaction.guildId, target.id);
+    const target = interaction.options.getUser('user')
+    const existing = db
+      .prepare(
+        'SELECT 1 FROM suspended_users WHERE guild_id = ? AND user_id = ?'
+      )
+      .get(interaction.guildId, target.id)
     if (!existing) {
-        return interaction.reply({ content: `❌ **${target.username}** is not suspended in this server.`, ephemeral: true });
+      return interaction.reply({
+        content: `❌ **${target.username}** is not suspended in this server.`,
+        ephemeral: true
+      })
     }
 
-    db.prepare("DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?").run(interaction.guildId, target.id);
-    logAction(interaction.guildId, "USER_UNBLOCKED", `${target.username} suspension lifted`, userId, userName, userAvatar, `/unsuspend`, null, null);
+    db.prepare(
+      'DELETE FROM suspended_users WHERE guild_id = ? AND user_id = ?'
+    ).run(interaction.guildId, target.id)
+    logAction(
+      interaction.guildId,
+      'USER_UNBLOCKED',
+      `${target.username} suspension lifted`,
+      userId,
+      userName,
+      userAvatar,
+      `/unsuspend`,
+      null,
+      null
+    )
 
     return interaction.reply({
-        embeds: [new EmbedBuilder()
-            .setTitle('✅ Suspension Lifted')
-            .setDescription(`**${target.username}** can now use bot commands again in this server.`)
-            .setColor(0x10b981)
-            .setTimestamp()],
-        ephemeral: true
-    });
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('✅ Suspension Lifted')
+          .setDescription(
+            `**${target.username}** can now use bot commands again in this server.`
+          )
+          .setColor(0x10b981)
+          .setTimestamp()
+      ],
+      ephemeral: true
+    })
   }
 
   if (interaction.commandName === 'closethreads') {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: '❌ Administrator only.', ephemeral: true });
+    if (
+      !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
+    ) {
+      return interaction.reply({
+        content: '❌ Administrator only.',
+        ephemeral: true
+      })
     }
     if (!settings) {
-        return interaction.reply({ content: '❌ Run `/setup` first.', ephemeral: true });
+      return interaction.reply({
+        content: '❌ Run `/setup` first.',
+        ephemeral: true
+      })
     }
 
-    const days = interaction.options.getInteger('days');
-    const sendWarn = interaction.options.getBoolean('warn') ?? false;
-    const dryRun = interaction.options.getBoolean('dry_run') ?? false;
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const days = interaction.options.getInteger('days')
+    const sendWarn = interaction.options.getBoolean('warn') ?? false
+    const dryRun = interaction.options.getBoolean('dry_run') ?? false
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
 
     try {
-        const forumChannel = await client.channels.fetch(settings.forum_id).catch(() => null);
-        if (!forumChannel) return interaction.reply({ content: '❌ Could not fetch the configured forum channel. Has `/setup` been run?', ephemeral: true });
+      const forumChannel = await client.channels
+        .fetch(settings.forum_id)
+        .catch(() => null)
+      if (!forumChannel)
+        return interaction.reply({
+          content:
+            '❌ Could not fetch the configured forum channel. Has `/setup` been run?',
+          ephemeral: true
+        })
 
-        await interaction.deferReply({ ephemeral: true });
-        if (!forumChannel) {
-            return interaction.editReply('❌ Could not fetch the configured forum channel.');
+      await interaction.deferReply({ ephemeral: true })
+      if (!forumChannel) {
+        return interaction.editReply(
+          '❌ Could not fetch the configured forum channel.'
+        )
+      }
+
+      // Fetch all active threads from Discord directly
+      const fetchedThreads = await forumChannel.threads.fetchActive()
+      const candidates = []
+
+      for (const [, thread] of fetchedThreads.threads) {
+        if (!thread.createdTimestamp || thread.createdTimestamp > cutoff)
+          continue
+        if (thread.locked || thread.archived) continue
+        if (thread.appliedTags.includes(settings.resolved_tag)) continue
+        candidates.push(thread)
+      }
+
+      if (dryRun) {
+        const embed = new EmbedBuilder()
+          .setTitle('🔍 Dry Run — Bulk Close Preview')
+          .setDescription(
+            `**${candidates.length}** threads would be closed.\n\n` +
+              `**Parameters:**\n` +
+              `• Older than: **${days} days**\n` +
+              `• Send warning message: **${sendWarn ? 'Yes' : 'No'}**\n\n` +
+              `Run the command again without \`dry_run\` to execute.`
+          )
+          .setColor(0x3b82f6)
+          .setTimestamp()
+          .setFooter({ text: 'Impulse Bot • Dry Run' })
+
+        if (candidates.length > 0 && candidates.length <= 20) {
+          embed.addFields({
+            name: 'Affected Threads',
+            value: candidates.map(t => `• ${t.name}`).join('\n')
+          })
+        } else if (candidates.length > 20) {
+          embed.addFields({
+            name: 'Sample (first 20)',
+            value: candidates
+              .slice(0, 20)
+              .map(t => `• ${t.name}`)
+              .join('\n')
+          })
         }
 
-        // Fetch all active threads from Discord directly
-        const fetchedThreads = await forumChannel.threads.fetchActive();
-        const candidates = [];
+        return interaction.editReply({ embeds: [embed] })
+      }
 
-        for (const [, thread] of fetchedThreads.threads) {
-            if (!thread.createdTimestamp || thread.createdTimestamp > cutoff) continue;
-            if (thread.locked || thread.archived) continue;
-            if (thread.appliedTags.includes(settings.resolved_tag)) continue;
-            candidates.push(thread);
-        }
+      if (candidates.length === 0) {
+        return interaction.editReply(
+          `✅ No threads found older than **${days} days**. Nothing to close.`
+        )
+      }
 
-        if (dryRun) {
-            const embed = new EmbedBuilder()
-                .setTitle('🔍 Dry Run — Bulk Close Preview')
+      // Acknowledge immediately so the interaction doesn't time out
+      await interaction.editReply(
+        `⏳ Processing **${candidates.length}** threads in chunks. This may take a while — you'll get a follow-up when done.`
+      )
+
+      let closed = 0,
+        warned = 0,
+        failed = 0
+
+      await processInChunks(
+        candidates,
+        async thread => {
+          try {
+            if (sendWarn) {
+              const warnEmbed = new EmbedBuilder()
+                .setTitle('⚠️ Thread Being Closed by Staff')
                 .setDescription(
-                    `**${candidates.length}** threads would be closed.\n\n` +
-                    `**Parameters:**\n` +
-                    `• Older than: **${days} days**\n` +
-                    `• Send warning message: **${sendWarn ? 'Yes' : 'No'}**\n\n` +
-                    `Run the command again without \`dry_run\` to execute.`
+                  `Hey <@${
+                    thread.ownerId
+                  }>! This thread (opened <t:${Math.floor(
+                    thread.createdTimestamp / 1000
+                  )}:D>) is being closed by a moderator as part of a cleanup of threads older than **${days} days**.\n\n` +
+                    `If you still need help, please create a new thread.`
                 )
-                .setColor(0x3b82f6)
+                .setColor(0xf59e0b)
                 .setTimestamp()
-                .setFooter({ text: 'Impulse Bot • Dry Run' });
+                .setFooter({ text: 'Impulse Bot • Staff Bulk Close' })
 
-            if (candidates.length > 0 && candidates.length <= 20) {
-                embed.addFields({
-                    name: 'Affected Threads',
-                    value: candidates.map(t => `• ${t.name}`).join('\n')
-                });
-            } else if (candidates.length > 20) {
-                embed.addFields({
-                    name: 'Sample (first 20)',
-                    value: candidates.slice(0, 20).map(t => `• ${t.name}`).join('\n')
-                });
+              await thread.send({
+                content: `<@${thread.ownerId}>`,
+                embeds: [warnEmbed]
+              })
+              warned++
+              await sleep(500) // small extra delay after warning before locking
             }
 
-            return interaction.editReply({ embeds: [embed] });
-        }
+            await thread.setLocked(true)
 
-        if (candidates.length === 0) {
-            return interaction.editReply(`✅ No threads found older than **${days} days**. Nothing to close.`);
-        }
+            const closeEmbed = new EmbedBuilder()
+              .setTitle('🔒 Thread Closed')
+              .setDescription(
+                sendWarn
+                  ? 'This thread has been closed as part of a staff cleanup. Create a new thread if you still need help.'
+                  : `This thread has been closed by staff — it was older than **${days} days** with no activity.`
+              )
+              .setColor(0x6b7280)
+              .setTimestamp()
+              .setFooter({
+                text: `Impulse Bot • Bulk Close by ${interaction.user.username}`
+              })
 
-        // Acknowledge immediately so the interaction doesn't time out
-        await interaction.editReply(
-            `⏳ Processing **${candidates.length}** threads in chunks. This may take a while — you'll get a follow-up when done.`
-        );
+            await thread.send({ embeds: [closeEmbed] })
 
-        let closed = 0, warned = 0, failed = 0;
-
-        await processInChunks(candidates, async (thread) => {
-            try {
-                if (sendWarn) {
-                    const warnEmbed = new EmbedBuilder()
-                        .setTitle('⚠️ Thread Being Closed by Staff')
-                        .setDescription(
-                            `Hey <@${thread.ownerId}>! This thread (opened <t:${Math.floor(thread.createdTimestamp / 1000)}:D>) is being closed by a moderator as part of a cleanup of threads older than **${days} days**.\n\n` +
-                            `If you still need help, please create a new thread.`
-                        )
-                        .setColor(0xf59e0b)
-                        .setTimestamp()
-                        .setFooter({ text: 'Impulse Bot • Staff Bulk Close' });
-
-                    await thread.send({ content: `<@${thread.ownerId}>`, embeds: [warnEmbed] });
-                    warned++;
-                    await sleep(500); // small extra delay after warning before locking
-                }
-
-                await thread.setLocked(true);
-
-                const closeEmbed = new EmbedBuilder()
-                    .setTitle('🔒 Thread Closed')
-                    .setDescription(
-                        sendWarn
-                            ? 'This thread has been closed as part of a staff cleanup. Create a new thread if you still need help.'
-                            : `This thread has been closed by staff — it was older than **${days} days** with no activity.`
-                    )
-                    .setColor(0x6b7280)
-                    .setTimestamp()
-                    .setFooter({ text: `Impulse Bot • Bulk Close by ${interaction.user.username}` });
-
-                await thread.send({ embeds: [closeEmbed] });
-
-                // Remove from tracking if present
-                db.prepare("DELETE FROM thread_tracking WHERE thread_id = ?").run(thread.id);
-                logAction(
-                    interaction.guildId, "BULK_CLOSE",
-                    `Bulk closed: ${thread.name} (${days}d cutoff)`,
-                    userId, userName, userAvatar,
-                    `/closethreads days:${days} warn:${sendWarn}`,
-                    thread.id, null
-                );
-                await logToDiscord(interaction.guildId, "BULK_CLOSE", `Bulk close executed by <@${userId}>: ${closed} threads closed (${days}d cutoff)`);
-                closed++;
-            } catch (e) {
-                console.error(`Failed to close thread ${thread.name}:`, e.message);
-                failed++;
-            }
-        }, 3, 2000); // 3 at a time, 2s between chunks
-
-        const resultEmbed = new EmbedBuilder()
-            .setTitle('✅ Bulk Close Complete')
-            .addFields(
-                { name: 'Closed', value: closed.toString(), inline: true },
-                { name: sendWarn ? 'Warned' : 'Silent', value: (sendWarn ? warned : closed).toString(), inline: true },
-                { name: 'Failed', value: failed.toString(), inline: true },
-                { name: 'Cutoff', value: `${days} days`, inline: true },
+            // Remove from tracking if present
+            db.prepare('DELETE FROM thread_tracking WHERE thread_id = ?').run(
+              thread.id
             )
-            .setColor(failed > 0 ? 0xf59e0b : 0x10b981)
-            .setTimestamp()
-            .setFooter({ text: `Impulse Bot • Executed by ${interaction.user.username}` });
+            logAction(
+              interaction.guildId,
+              'BULK_CLOSE',
+              `Bulk closed: ${thread.name} (${days}d cutoff)`,
+              userId,
+              userName,
+              userAvatar,
+              `/closethreads days:${days} warn:${sendWarn}`,
+              thread.id,
+              null
+            )
+            await logToDiscord(
+              interaction.guildId,
+              'BULK_CLOSE',
+              `Bulk close executed by <@${userId}>: ${closed} threads closed (${days}d cutoff)`
+            )
+            closed++
+          } catch (e) {
+            console.error(`Failed to close thread ${thread.name}:`, e.message)
+            failed++
+          }
+        },
+        3,
+        2000
+      ) // 3 at a time, 2s between chunks
 
-        await interaction.followUp({ embeds: [resultEmbed], ephemeral: true });
+      const resultEmbed = new EmbedBuilder()
+        .setTitle('✅ Bulk Close Complete')
+        .addFields(
+          { name: 'Closed', value: closed.toString(), inline: true },
+          {
+            name: sendWarn ? 'Warned' : 'Silent',
+            value: (sendWarn ? warned : closed).toString(),
+            inline: true
+          },
+          { name: 'Failed', value: failed.toString(), inline: true },
+          { name: 'Cutoff', value: `${days} days`, inline: true }
+        )
+        .setColor(failed > 0 ? 0xf59e0b : 0x10b981)
+        .setTimestamp()
+        .setFooter({
+          text: `Impulse Bot • Executed by ${interaction.user.username}`
+        })
 
+      await interaction.followUp({ embeds: [resultEmbed], ephemeral: true })
     } catch (err) {
-        console.error('closethreads error:', err);
-        await interaction.editReply('❌ An error occurred during bulk close. Check the logs.');
+      console.error('closethreads error:', err)
+      await interaction.editReply(
+        '❌ An error occurred during bulk close. Check the logs.'
+      )
     }
   }
-});
+})
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN)
