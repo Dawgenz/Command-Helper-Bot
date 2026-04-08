@@ -249,6 +249,10 @@ try {
     db.prepare(`ALTER TABLE thread_tracking ADD COLUMN first_responder_id TEXT`).run();
 } catch (e) { /* exists */ }
 
+try {
+    db.prepare(`ALTER TABLE helper_profiles ADD COLUMN banner_animation TEXT DEFAULT 'none'`).run();
+} catch (e) { /* exists */ }
+
 // --- HELPERS ---
 const getSettings = (guildId) =>
   db.prepare("SELECT * FROM guild_settings WHERE guild_id = ?").get(guildId);
@@ -849,26 +853,101 @@ app.get("/", async (req, res) => {
     } catch (e) {}
   }
 
-  const recentLogs = db
-    .prepare(
-      `
-        SELECT audit_logs.*, guild_settings.guild_name 
-        FROM audit_logs 
-        LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
-        ORDER BY timestamp DESC LIMIT 5
-    `
-    )
-    .all();
+  // Scope all activity and stats to only the guilds this user can access
+  const authorizedGuildIds = authorizedGuilds.map(g => g.guild_id);
 
-  const totalSnippets = db
-    .prepare("SELECT COUNT(*) as count FROM snippets")
-    .get().count;
-  const totalLocks = db
-    .prepare("SELECT COUNT(*) as count FROM pending_locks")
-    .get().count;
-  const totalLogs = db
-    .prepare("SELECT COUNT(*) as count FROM audit_logs")
-    .get().count;
+  const recentLogs = authorizedGuildIds.length > 0
+    ? db.prepare(
+        `SELECT audit_logs.*, guild_settings.guild_name 
+         FROM audit_logs 
+         LEFT JOIN guild_settings ON audit_logs.guild_id = guild_settings.guild_id 
+         WHERE audit_logs.guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})
+         ORDER BY timestamp DESC LIMIT 5`
+      ).all(...authorizedGuildIds)
+    : [];
+
+  const totalSnippets = authorizedGuildIds.length > 0
+    ? db.prepare(`SELECT COUNT(*) as count FROM snippets WHERE guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})`)
+        .get(...authorizedGuildIds).count
+    : 0;
+  const totalLocks = authorizedGuildIds.length > 0
+    ? db.prepare(`SELECT COUNT(*) as count FROM pending_locks WHERE guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})`)
+        .get(...authorizedGuildIds).count
+    : 0;
+  const totalLogs = authorizedGuildIds.length > 0
+    ? db.prepare(`SELECT COUNT(*) as count FROM audit_logs WHERE guild_id IN (${authorizedGuildIds.map(() => '?').join(',')})`)
+        .get(...authorizedGuildIds).count
+    : 0;
+
+  // User is logged in but has no server access — show invite page
+  if (authorizedGuildIds.length === 0) {
+    const botAvatar = client.user.displayAvatarURL();
+    const uptimeSeconds = process.uptime();
+    const d = Math.floor(uptimeSeconds / 86400);
+    const h = Math.floor((uptimeSeconds % 86400) / 3600);
+    const m = Math.floor((uptimeSeconds % 3600) / 60);
+    return res.send(`
+      <html>
+      ${getHead("Impulse | No Server Access")}
+      <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
+      <div class="max-w-3xl mx-auto">
+          ${getNav("overview", req.user)}
+          <div class="text-center py-16">
+              <div class="inline-block relative mb-8">
+                  <div class="absolute inset-0 bg-[#FFAA00] blur-2xl opacity-20 rounded-full"></div>
+                  <img src="${botAvatar}" class="w-20 h-20 rounded-2xl border-2 border-[#FFAA00]/30 relative z-10">
+              </div>
+              <h1 class="text-3xl font-black text-white uppercase tracking-tighter mb-2">
+                  Welcome, <span class="text-[#FFAA00]">${sanitize(req.user.username)}</span>
+              </h1>
+              <p class="text-slate-500 text-sm mb-8">You're not an admin or helper in any server where Impulse is set up yet.</p>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10 text-left">
+                  <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
+                      <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Bot Status</p>
+                      <div class="flex items-center gap-2">
+                          <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                          <p class="text-sm font-bold text-emerald-400">Online</p>
+                      </div>
+                  </div>
+                  <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
+                      <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Uptime</p>
+                      <p class="text-sm font-bold text-white">${d > 0 ? d + 'd ' : ''}${h}h ${m}m</p>
+                  </div>
+                  <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
+                      <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Version</p>
+                      <p class="text-sm font-bold text-[#FFAA00]">2.5.0 • Stable</p>
+                  </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10 text-left">
+                  <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 text-center">
+                      <p class="text-3xl font-black text-white mb-1">${client.guilds.cache.size}</p>
+                      <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Active Servers</p>
+                  </div>
+                  <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 text-center">
+                      <p class="text-3xl font-black text-white mb-1">${client.users.cache.size.toLocaleString()}</p>
+                      <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Cached Users</p>
+                  </div>
+                  <div class="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 text-center">
+                      <p class="text-3xl font-black text-white mb-1">${db.prepare("SELECT COUNT(*) as c FROM audit_logs").get().c.toLocaleString()}</p>
+                      <p class="text-[9px] text-slate-500 uppercase font-bold tracking-wider">Total Events Logged</p>
+                  </div>
+              </div>
+
+              <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                  <a href="/invite" class="bg-[#FFAA00] hover:bg-amber-400 text-black px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-amber-500/20">
+                      Add Impulse to Your Server
+                  </a>
+                  <a href="/logout" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-widest transition-all border border-slate-700">
+                      Switch Account
+                  </a>
+              </div>
+          </div>
+      </div>
+      </body></html>
+    `);
+  }
 
   res.send(`
     <html>
@@ -3276,6 +3355,7 @@ app.get("/metrics/leaderboard", async (req, res) => {
     const myRank = leaderboard.findIndex(r => r.uid === req.user.id) + 1;
 
     const gradientPresets = [
+        // Solid-style
         { label: 'Gold', value: 'linear-gradient(135deg, #FFAA00, #ff6b00)' },
         { label: 'Ocean', value: 'linear-gradient(135deg, #0ea5e9, #6366f1)' },
         { label: 'Forest', value: 'linear-gradient(135deg, #10b981, #059669)' },
@@ -3284,11 +3364,70 @@ app.get("/metrics/leaderboard", async (req, res) => {
         { label: 'Slate', value: 'linear-gradient(135deg, #334155, #0f172a)' },
         { label: 'Crimson', value: 'linear-gradient(135deg, #dc2626, #7f1d1d)' },
         { label: 'Cyan', value: 'linear-gradient(135deg, #06b6d4, #0284c7)' },
+        // Multi-stop
+        { label: 'Sunset', value: 'linear-gradient(135deg, #f97316, #ec4899, #8b5cf6)' },
+        { label: 'Aurora', value: 'linear-gradient(135deg, #10b981, #06b6d4, #8b5cf6)' },
+        { label: 'Fire', value: 'linear-gradient(135deg, #fbbf24, #ef4444, #7f1d1d)' },
+        { label: 'Galaxy', value: 'linear-gradient(135deg, #1e1b4b, #4c1d95, #0ea5e9)' },
+        { label: 'Mint', value: 'linear-gradient(135deg, #ecfdf5, #6ee7b7, #059669)' },
+        { label: 'Midnight', value: 'linear-gradient(135deg, #0f172a, #1e3a5f, #0ea5e9)' },
+        { label: 'Candy', value: 'linear-gradient(135deg, #f9a8d4, #a78bfa, #6ee7b7)' },
+        { label: 'Lava', value: 'linear-gradient(135deg, #450a0a, #dc2626, #fbbf24)' },
+    ];
+
+    const badgeOptions = [
+        { label: 'None', value: '' },
+        { label: 'Star', value: '⭐' },
+        { label: 'Fire', value: '🔥' },
+        { label: 'Crown', value: '👑' },
+        { label: 'Lightning', value: '⚡' },
+        { label: 'Diamond', value: '💎' },
+        { label: 'Rocket', value: '🚀' },
+        { label: 'Shield', value: '🛡️' },
+        { label: 'Sword', value: '⚔️' },
+        { label: 'Trophy', value: '🏆' },
+        { label: 'Ghost', value: '👻' },
+        { label: 'Robot', value: '🤖' },
+        { label: 'Alien', value: '👾' },
+        { label: 'Ninja', value: '🥷' },
+        { label: 'Wizard', value: '🧙' },
+        { label: 'Custom', value: 'custom' },
+    ];
+
+    const animationOptions = [
+        { label: 'None', value: 'none' },
+        { label: 'Shimmer', value: 'shimmer' },
+        { label: 'Pulse', value: 'pulse' },
+        { label: 'Glow', value: 'glow' },
     ];
 
     res.send(`
         <html>
         ${getHead("Impulse | Helper Leaderboard")}
+        <style>
+            @keyframes shimmer {
+                0% { background-position: -200% center; }
+                100% { background-position: 200% center; }
+            }
+            @keyframes pulse-glow {
+                0%, 100% { box-shadow: 0 0 8px 2px rgba(255,170,0,0.2); }
+                50% { box-shadow: 0 0 20px 6px rgba(255,170,0,0.5); }
+            }
+            @keyframes slow-pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.7; }
+            }
+            .anim-shimmer .card-banner {
+                background-size: 200% auto !important;
+                animation: shimmer 3s linear infinite;
+            }
+            .anim-pulse .card-banner {
+                animation: slow-pulse 2s ease-in-out infinite;
+            }
+            .anim-glow {
+                animation: pulse-glow 2.5s ease-in-out infinite;
+            }
+        </style>
         <body class="bg-[#0b0f1a] text-slate-200 min-h-screen p-6 md:p-8">
         <div class="max-w-5xl mx-auto">
             ${getNav("metrics", req.user)}
@@ -3309,38 +3448,76 @@ app.get("/metrics/leaderboard", async (req, res) => {
                     <!-- Editor -->
                     <form method="POST" action="/metrics/leaderboard/profile" class="space-y-4">
                         <input type="hidden" name="guild" value="${selectedGuildId}">
-                        <div>
-                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Display Name</label>
-                            <input name="display_name" value="${sanitize(myProfile?.display_name || resolveUserName(req.user.id))}"
-                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Display Name</label>
+                                <input name="display_name" value="${sanitize(myProfile?.display_name || resolveUserName(req.user.id))}"
+                                    class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+                            </div>
+                            <div>
+                                <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Bio <span class="text-slate-600 normal-case font-normal">(80 chars)</span></label>
+                                <input name="bio" maxlength="80" value="${sanitize(myProfile?.bio || '')}" placeholder="A short tagline..."
+                                    class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+                            </div>
                         </div>
+
                         <div>
-                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Bio <span class="text-slate-700 normal-case font-normal">(max 80 chars)</span></label>
-                            <input name="bio" maxlength="80" value="${sanitize(myProfile?.bio || '')}" placeholder="A short tagline..."
-                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Badge</label>
+                            <div class="grid grid-cols-5 gap-1.5 mb-2">
+                                ${badgeOptions.filter(b => b.value !== 'custom').map(b => `
+                                    <button type="button" onclick="setBadge('${b.value}')"
+                                        title="${b.label}"
+                                        class="badge-btn h-9 rounded-lg border-2 text-lg flex items-center justify-center transition cursor-pointer
+                                               ${(myProfile?.badge || '') === b.value ? 'border-[#FFAA00] bg-[#FFAA00]/10' : 'border-slate-800 bg-slate-900/40 hover:border-slate-600'}"
+                                        data-value="${b.value}">
+                                        ${b.value || '<span class="text-slate-600 text-xs font-bold">∅</span>'}
+                                    </button>
+                                `).join('')}
+                            </div>
+                            <input type="hidden" name="badge" id="badgeInput" value="${sanitize(myProfile?.badge || '')}">
+                            <div class="flex items-center gap-2 mt-1">
+                                <input type="text" id="customBadgeInput" maxlength="4" placeholder="Or type any emoji..."
+                                    class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-[#FFAA00] outline-none">
+                                <button type="button" onclick="setBadge(document.getElementById('customBadgeInput').value)"
+                                    class="text-[9px] font-black uppercase text-[#FFAA00] border border-[#FFAA00]/30 px-3 py-1.5 rounded-lg hover:bg-[#FFAA00]/10 transition">Use</button>
+                            </div>
                         </div>
-                        <div>
-                            <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Badge Emoji</label>
-                            <input name="badge" maxlength="4" value="${sanitize(myProfile?.badge || '')}" placeholder="🌟"
-                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
-                        </div>
+
                         <div>
                             <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Banner Style</label>
-                            <div class="grid grid-cols-4 gap-2 mb-2">
-                                ${gradientPresets.map(g => `
+                            <div class="grid grid-cols-8 gap-1.5 mb-3">
+                                ${gradientPresets.map((g, idx) => `
                                     <button type="button" onclick="setGradient('${g.value}')"
-                                        class="h-8 rounded-lg border-2 border-transparent hover:border-white/50 transition cursor-pointer"
-                                        style="background: ${g.value}" title="${g.label}"></button>
+                                        class="gradient-btn h-8 rounded-lg border-2 transition cursor-pointer
+                                               ${(myProfile?.banner_gradient || '') === g.value ? 'border-white scale-110' : 'border-transparent hover:border-white/40 hover:scale-105'}"
+                                        style="background: ${g.value}" title="${g.label}" data-value="${g.value}"></button>
                                 `).join('')}
                             </div>
                             <input type="hidden" name="banner_gradient" id="bannerGradientInput" value="${myProfile?.banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)'}">
-                            <div class="flex items-center gap-2 mt-2">
-                                <input type="color" name="banner_color" id="bannerColorPicker" value="${myProfile?.banner_color || '#FFAA00'}"
-                                    class="w-8 h-8 rounded cursor-pointer bg-transparent border-none">
-                                <label class="text-[9px] text-slate-500">Accent color (bar + border)</label>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Accent Color</label>
+                                <div class="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                                    <input type="color" name="banner_color" id="bannerColorPicker" value="${myProfile?.banner_color || '#FFAA00'}"
+                                        class="w-6 h-6 rounded cursor-pointer bg-transparent border-none">
+                                    <span class="text-[9px] text-slate-500">Border + stat color</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Card Animation</label>
+                                <select name="banner_animation" id="animationSelect"
+                                    class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-[#FFAA00] outline-none">
+                                    ${animationOptions.map(a => `
+                                        <option value="${a.value}" ${(myProfile?.banner_animation || 'none') === a.value ? 'selected' : ''}>${a.label}</option>
+                                    `).join('')}
+                                </select>
                             </div>
                         </div>
-                        <button type="submit" class="w-full bg-[#FFAA00] text-black py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition">
+
+                        <button type="submit" class="w-full bg-[#FFAA00] text-black py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-400 transition shadow-lg shadow-amber-500/20">
                             Save Profile
                         </button>
                     </form>
@@ -3376,10 +3553,13 @@ app.get("/metrics/leaderboard", async (req, res) => {
                     const accentColor = r.profile?.banner_color || '#FFAA00';
                     const badge = r.profile?.badge || '';
                     const displayName = r.profile?.display_name || r.name;
+                    const anim = r.profile?.banner_animation || 'none';
+                    const animClass = anim !== 'none' ? `anim-${anim}` : '';
                     const medals = ['🥇', '🥈', '🥉'];
+                    const isMe = r.uid === req.user.id;
                     return `
-                    <div class="rounded-2xl overflow-hidden border border-slate-800 hover:border-slate-700 transition">
-                        <div class="h-10 w-full" style="background: ${gradient}"></div>
+                    <div class="rounded-2xl overflow-hidden border transition ${isMe ? 'border-[#FFAA00]/40' : 'border-slate-800 hover:border-slate-700'} ${anim === 'glow' ? 'anim-glow' : ''} ${animClass}">
+                        <div class="card-banner h-10 w-full" style="background: ${gradient}"></div>
                         <div class="bg-slate-900/60 px-5 pb-4 pt-0 flex items-center justify-between">
                             <div class="flex items-center gap-4 -mt-5">
                                 <div class="relative shrink-0">
@@ -3419,25 +3599,50 @@ app.get("/metrics/leaderboard", async (req, res) => {
             function setGradient(gradient) {
                 document.getElementById('bannerGradientInput').value = gradient;
                 document.getElementById('previewBanner').style.background = gradient;
+                // Update selected state
+                document.querySelectorAll('.gradient-btn').forEach(btn => {
+                    const isSelected = btn.dataset.value === gradient;
+                    btn.classList.toggle('border-white', isSelected);
+                    btn.classList.toggle('scale-110', isSelected);
+                    btn.classList.toggle('border-transparent', !isSelected);
+                });
+            }
+
+            function setBadge(val) {
+                if (!val && val !== '') return;
+                document.getElementById('badgeInput').value = val;
+                document.getElementById('previewBadge').textContent = val;
+                // Update selected state on badge buttons
+                document.querySelectorAll('.badge-btn').forEach(btn => {
+                    const isSelected = btn.dataset.value === val;
+                    btn.classList.toggle('border-[#FFAA00]', isSelected);
+                    btn.classList.toggle('bg-[#FFAA00]/10', isSelected);
+                    btn.classList.toggle('border-slate-800', !isSelected);
+                });
             }
 
             // Live preview updates
             const nameInput = document.querySelector('input[name="display_name"]');
             const bioInput = document.querySelector('input[name="bio"]');
-            const badgeInput = document.querySelector('input[name="badge"]');
             const colorPicker = document.getElementById('bannerColorPicker');
+            const animSelect = document.getElementById('animationSelect');
+            const previewCard = document.getElementById('cardPreview');
 
             if (nameInput) nameInput.addEventListener('input', e => {
-                document.getElementById('previewName').childNodes[0].textContent = e.target.value || 'Your Name';
+                const node = document.getElementById('previewName').childNodes[0];
+                if (node) node.textContent = e.target.value || 'Your Name';
             });
             if (bioInput) bioInput.addEventListener('input', e => {
                 document.getElementById('previewBio').textContent = e.target.value;
             });
-            if (badgeInput) badgeInput.addEventListener('input', e => {
-                document.getElementById('previewBadge').textContent = e.target.value;
-            });
             if (colorPicker) colorPicker.addEventListener('input', e => {
                 document.getElementById('previewColor').style.color = e.target.value;
+                document.getElementById('cardPreview').style.borderColor = e.target.value + '66';
+            });
+            if (animSelect) animSelect.addEventListener('change', e => {
+                if (!previewCard) return;
+                previewCard.classList.remove('anim-shimmer', 'anim-pulse', 'anim-glow');
+                if (e.target.value !== 'none') previewCard.classList.add('anim-' + e.target.value);
             });
         </script>
         </body></html>
@@ -3447,7 +3652,7 @@ app.get("/metrics/leaderboard", async (req, res) => {
 app.post("/metrics/leaderboard/profile", express.urlencoded({ extended: true }), async (req, res) => {
     if (!req.isAuthenticated()) return res.redirect("/auth/discord");
 
-    const { display_name, bio, badge, banner_gradient, banner_color, guild } = req.body;
+    const { display_name, bio, badge, banner_gradient, banner_color, banner_animation, guild } = req.body;
 
     // Validate — must be on the leaderboard to save a profile
     const hasResponded = db.prepare(
@@ -3459,14 +3664,15 @@ app.post("/metrics/leaderboard/profile", express.urlencoded({ extended: true }),
     }
 
     db.prepare(`
-        INSERT INTO helper_profiles (user_id, display_name, bio, badge, banner_gradient, banner_color, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO helper_profiles (user_id, display_name, bio, badge, banner_gradient, banner_color, banner_animation, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
             display_name = excluded.display_name,
             bio = excluded.bio,
             badge = excluded.badge,
             banner_gradient = excluded.banner_gradient,
             banner_color = excluded.banner_color,
+            banner_animation = excluded.banner_animation,
             updated_at = excluded.updated_at
     `).run(
         req.user.id,
@@ -3475,6 +3681,7 @@ app.post("/metrics/leaderboard/profile", express.urlencoded({ extended: true }),
         sanitize(badge?.slice(0, 4) || ''),
         banner_gradient || 'linear-gradient(135deg, #1e293b, #0f172a)',
         banner_color || '#FFAA00',
+        ['none', 'shimmer', 'pulse', 'glow'].includes(banner_animation) ? banner_animation : 'none',
         Date.now()
     );
 
@@ -3493,11 +3700,14 @@ app.get("/metrics", async (req, res) => {
         return { id, name: g ? g.name : id };
     });
 
-    // Response time stats
+    // Only count responses under 24h — late responses are recorded but excluded from rankings
     const responseTimes = db.prepare(`
         SELECT first_response_at, created_at, first_responder_id
         FROM thread_tracking 
-        WHERE guild_id = ? AND first_response_at IS NOT NULL
+        WHERE guild_id = ? 
+        AND first_response_at IS NOT NULL 
+        AND first_responder_id IS NOT NULL
+        AND (first_response_at - created_at) <= 86400000
     `).all(selectedGuildId);
 
     const avgResponseMs = responseTimes.length > 0
@@ -4093,14 +4303,22 @@ client.on("messageCreate", async (message) => {
     console.error("Error removing unanswered tag:", e);
   }
 
-  // Track first helper response time
+  // Track first helper response time — only count if under 24 hours (avoids stale warning skew)
   if (message.author.id !== message.channel.ownerId) {
     const tracked = db.prepare("SELECT * FROM thread_tracking WHERE thread_id = ?").get(message.channel.id);
     if (tracked && !tracked.first_response_at) {
         const responseTimeMs = Date.now() - tracked.created_at;
-        db.prepare("UPDATE thread_tracking SET first_response_at = ?, first_responder_id = ? WHERE thread_id = ?")
-            .run(Date.now(), message.author.id, message.channel.id);
-        console.log(`⏱️ First response in ${Math.round(responseTimeMs / 60000)}min for: ${message.channel.name}`);
+        const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+        if (responseTimeMs <= TWENTY_FOUR_HOURS) {
+            db.prepare("UPDATE thread_tracking SET first_response_at = ?, first_responder_id = ? WHERE thread_id = ?")
+                .run(Date.now(), message.author.id, message.channel.id);
+            console.log(`⏱️ First response in ${Math.round(responseTimeMs / 60000)}min for: ${message.channel.name}`);
+        } else {
+            // Still record who responded but mark it as unranked (null responder = not counted)
+            db.prepare("UPDATE thread_tracking SET first_response_at = ? WHERE thread_id = ?")
+                .run(Date.now(), message.channel.id);
+            console.log(`⏱️ Late response (${Math.round(responseTimeMs / 3600000)}h) — not counted for rankings: ${message.channel.name}`);
+        }
     }
   }
 
